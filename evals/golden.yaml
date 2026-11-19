@@ -1,0 +1,199 @@
+# Golden dataset — the "answer key" for retrieval evals.
+#
+# Each topic = a question a user might ask + papers a GOOD balanced reading list
+# (12 papers) MUST contain.
+#
+#   kind: foundational  -> landmark work (tests the relevant / highly_cited buckets)
+#   kind: recent        -> important newer work (tests the recent bucket)
+#
+# Papers are matched by DOI or normalized title. OpenAlex sometimes has several
+# records of one paper (arXiv preprint + conference version) with different DOIs,
+# so the title is a fallback match.
+#
+# Check every entry exists in OpenAlex (lookups are free) and write golden.lock.json:
+#     python evals/verify_golden.py
+#
+# golden.lock.json = machine-generated, do not edit. It records what OpenAlex
+# actually stores for each paper (ID, DOI, exact title) — often a DIFFERENT DOI
+# than the arXiv one (e.g. the conference version). The eval matches on all of
+# them, so a found paper is never wrongly counted as missed.
+#
+# ADD YOUR OWN: copy a topic block, keep must-haves few (2-3) and truly essential.
+
+topics:
+  # ---------------------------------------------------------------- AI / ML (fast)
+  - id: rag
+    field: AI
+    question: retrieval-augmented generation for knowledge-intensive NLP tasks
+    must_include:
+      - title: Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks
+        year: 2020
+        doi: 10.48550/arxiv.2005.11401
+        kind: foundational
+      - title: "Retrieval-Augmented Generation for Large Language Models: A Survey"
+        year: 2023
+        doi: 10.48550/arxiv.2312.10997
+        kind: recent
+
+  - id: llm-tool-use
+    field: AI
+    question: tool use in large language model agents
+    must_include:
+      - title: "Toolformer: Language Models Can Teach Themselves to Use Tools"
+        year: 2023
+        doi: 10.48550/arxiv.2302.04761
+        kind: foundational
+      - title: "ReAct: Synergizing Reasoning and Acting in Language Models"
+        year: 2022
+        doi: 10.48550/arxiv.2210.03629
+        kind: foundational
+
+  - id: llm-reasoning
+    field: AI
+    question: reinforcement learning to improve reasoning in large language models since 2024
+    must_include:
+      - title: DeepSeek-R1 incentivizes reasoning in LLMs through reinforcement learning
+        year: 2025
+        doi: 10.1038/s41586-025-09422-z
+        kind: recent
+      - title: Chain-of-Thought Prompting Elicits Reasoning in Large Language Models
+        year: 2022
+        doi: 10.48550/arxiv.2201.11903
+        kind: foundational
+
+  - id: transformers
+    field: AI
+    question: attention mechanisms in transformer neural networks
+    must_include:
+      - title: Attention Is All You Need
+        year: 2017
+        doi: 10.48550/arxiv.1706.03762
+        kind: foundational
+      - title: "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding"
+        year: 2018
+        doi: 10.48550/arxiv.1810.04805
+        kind: foundational
+
+  - id: diffusion
+    field: AI
+    question: diffusion models for image generation
+    must_include:
+      - title: Denoising Diffusion Probabilistic Models
+        year: 2020
+        doi: 10.48550/arxiv.2006.11239
+        kind: foundational
+      - title: High-Resolution Image Synthesis with Latent Diffusion Models
+        year: 2022
+        doi: 10.48550/arxiv.2112.10752
+        kind: foundational
+
+  - id: gnn-drug-discovery
+    field: AI / chemistry
+    question: graph neural networks for molecular property prediction in drug discovery
+    must_include:
+      - title: Neural Message Passing for Quantum Chemistry
+        year: 2017
+        doi: 10.48550/arxiv.1704.01212
+        kind: foundational
+      - title: Analyzing Learned Molecular Representations for Property Prediction
+        year: 2019
+        doi: 10.1021/acs.jcim.9b00237
+        kind: foundational
+
+  # ------------------------------------------------------ Biology / medicine (moderate)
+  - id: protein-structure
+    field: Biology
+    question: protein structure prediction with deep learning
+    must_include:
+      - title: Highly accurate protein structure prediction with AlphaFold
+        year: 2021
+        doi: 10.1038/s41586-021-03819-2
+        kind: foundational
+      - title: Accurate structure prediction of biomolecular interactions with AlphaFold 3
+        year: 2024
+        doi: 10.1038/s41586-024-07487-w
+        kind: recent
+
+  - id: crispr
+    field: Biology
+    question: CRISPR-Cas9 genome editing
+    must_include:
+      - title: A Programmable Dual-RNA–Guided DNA Endonuclease in Adaptive Bacterial Immunity
+        year: 2012
+        doi: 10.1126/science.1225829
+        kind: foundational
+      - title: Multiplex Genome Engineering Using CRISPR/Cas Systems
+        year: 2013
+        doi: 10.1126/science.1231143
+        kind: foundational
+      - title: Search-and-replace genome editing without double-strand breaks or donor DNA
+        year: 2019
+        doi: 10.1038/s41586-019-1711-4
+        kind: recent
+
+  - id: immunotherapy-biomarkers
+    field: Medicine
+    question: biomarkers for predicting response to immune checkpoint inhibitors
+    must_include:
+      - title: Mutational landscape determines sensitivity to PD-1 blockade in non–small cell lung cancer
+        year: 2015
+        doi: 10.1126/science.aaa1348
+        kind: foundational
+      - title: Tumor mutational load predicts survival after immunotherapy across multiple cancer types
+        year: 2019
+        doi: 10.1038/s41588-018-0312-8
+        kind: foundational
+
+  - id: mrna-vaccines
+    field: Medicine
+    question: mRNA vaccines efficacy and development
+    must_include:
+      - title: Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine
+        year: 2020
+        doi: 10.1056/nejmoa2034577
+        kind: foundational
+      - title: mRNA vaccines — a new era in vaccinology
+        year: 2018
+        doi: 10.1038/nrd.2017.243
+        kind: foundational
+
+  # ------------------------------------------------------ Physical sciences (slower)
+  - id: perovskite-solar
+    field: Materials
+    question: perovskite solar cells efficiency
+    must_include:
+      - title: Organometal Halide Perovskites as Visible-Light Sensitizers for Photovoltaic Cells
+        year: 2009
+        doi: 10.1021/ja809598r
+        kind: foundational
+      - title: Efficient Hybrid Solar Cells Based on Meso-Superstructured Organometal Halide Perovskites
+        year: 2012
+        doi: 10.1126/science.1228604
+        kind: foundational
+
+  - id: li-ion-batteries
+    field: Materials
+    question: electrode materials for lithium-ion batteries
+    must_include:
+      - title: Building better batteries
+        year: 2008
+        doi: 10.1038/451652a
+        kind: foundational
+      - title: Challenges for Rechargeable Li Batteries
+        year: 2009
+        doi: 10.1021/cm901452z
+        kind: foundational
+
+  # ------------------------------------------------------ Social science (slower)
+  - id: misinformation
+    field: Social science
+    question: spread of misinformation on social media
+    must_include:
+      - title: The spread of true and false news online
+        year: 2018
+        doi: 10.1126/science.aap9559
+        kind: foundational
+      - title: The science of fake news
+        year: 2018
+        doi: 10.1126/science.aao2998
+        kind: foundational

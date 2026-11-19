@@ -1,0 +1,504 @@
+{
+  "topics": [
+    {
+      "id": "rag",
+      "field": "AI",
+      "question": "retrieval-augmented generation for knowledge-intensive NLP tasks",
+      "must_include": [
+        {
+          "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W3027879771"
+          ],
+          "dois": [
+            "10.48550/arxiv.2005.11401"
+          ],
+          "titles": [
+            "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks"
+          ],
+          "year": 2020,
+          "cited_by_count": 10307
+        },
+        {
+          "title": "Retrieval-Augmented Generation for Large Language Models: A Survey",
+          "kind": "recent",
+          "openalex_ids": [
+            "W4389984066"
+          ],
+          "dois": [
+            "10.48550/arxiv.2312.10997"
+          ],
+          "titles": [
+            "Retrieval-Augmented Generation for Large Language Models: A Survey"
+          ],
+          "year": 2023,
+          "cited_by_count": 8657
+        }
+      ]
+    },
+    {
+      "id": "llm-tool-use",
+      "field": "AI",
+      "question": "tool use in large language model agents",
+      "must_include": [
+        {
+          "title": "Toolformer: Language Models Can Teach Themselves to Use Tools",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W7133214447"
+          ],
+          "dois": [
+            "10.48550/arxiv.2302.04761",
+            "10.52202/075280-2997"
+          ],
+          "titles": [
+            "Toolformer: Language Models Can Teach Themselves to Use Tools"
+          ],
+          "year": 2023,
+          "cited_by_count": 7669
+        },
+        {
+          "title": "ReAct: Synergizing Reasoning and Acting in Language Models",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W4304195432"
+          ],
+          "dois": [
+            "10.48550/arxiv.2210.03629"
+          ],
+          "titles": [
+            "ReAct: Synergizing Reasoning and Acting in Language Models"
+          ],
+          "year": 2022,
+          "cited_by_count": 9634
+        }
+      ]
+    },
+    {
+      "id": "llm-reasoning",
+      "field": "AI",
+      "question": "reinforcement learning to improve reasoning in large language models since 2024",
+      "must_include": [
+        {
+          "title": "DeepSeek-R1 incentivizes reasoning in LLMs through reinforcement learning",
+          "kind": "recent",
+          "openalex_ids": [
+            "W4414281281"
+          ],
+          "dois": [
+            "10.1038/s41586-025-09422-z"
+          ],
+          "titles": [
+            "DeepSeek-R1 incentivizes reasoning in LLMs through reinforcement learning"
+          ],
+          "year": 2025,
+          "cited_by_count": 18957
+        },
+        {
+          "title": "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W7133224126"
+          ],
+          "dois": [
+            "10.48550/arxiv.2201.11903",
+            "10.52202/068431-1800"
+          ],
+          "titles": [
+            "Chain-Of-Thought Prompting Elicits Reasoning in Large Language Models",
+            "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models"
+          ],
+          "year": 2022,
+          "cited_by_count": 38306
+        }
+      ]
+    },
+    {
+      "id": "transformers",
+      "field": "AI",
+      "question": "attention mechanisms in transformer neural networks",
+      "must_include": [
+        {
+          "title": "Attention Is All You Need",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2626778328"
+          ],
+          "dois": [
+            "10.48550/arxiv.1706.03762"
+          ],
+          "titles": [
+            "Attention Is All You Need"
+          ],
+          "year": 2017,
+          "cited_by_count": 151608
+        },
+        {
+          "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2896457183"
+          ],
+          "dois": [
+            "10.48550/arxiv.1810.04805"
+          ],
+          "titles": [
+            "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding"
+          ],
+          "year": 2018,
+          "cited_by_count": 82938
+        }
+      ]
+    },
+    {
+      "id": "diffusion",
+      "field": "AI",
+      "question": "diffusion models for image generation",
+      "must_include": [
+        {
+          "title": "Denoising Diffusion Probabilistic Models",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W3036167779"
+          ],
+          "dois": [
+            "10.48550/arxiv.2006.11239"
+          ],
+          "titles": [
+            "Denoising Diffusion Probabilistic Models"
+          ],
+          "year": 2020,
+          "cited_by_count": 20776
+        },
+        {
+          "title": "High-Resolution Image Synthesis with Latent Diffusion Models",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W4312933868"
+          ],
+          "dois": [
+            "10.1109/cvpr52688.2022.01042",
+            "10.48550/arxiv.2112.10752"
+          ],
+          "titles": [
+            "High-Resolution Image Synthesis with Latent Diffusion Models"
+          ],
+          "year": 2022,
+          "cited_by_count": 37105
+        }
+      ]
+    },
+    {
+      "id": "gnn-drug-discovery",
+      "field": "AI / chemistry",
+      "question": "graph neural networks for molecular property prediction in drug discovery",
+      "must_include": [
+        {
+          "title": "Neural Message Passing for Quantum Chemistry",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2606780347"
+          ],
+          "dois": [
+            "10.48550/arxiv.1704.01212"
+          ],
+          "titles": [
+            "Neural Message Passing for Quantum Chemistry"
+          ],
+          "year": 2017,
+          "cited_by_count": 11326
+        },
+        {
+          "title": "Analyzing Learned Molecular Representations for Property Prediction",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2966357564"
+          ],
+          "dois": [
+            "10.1021/acs.jcim.9b00237"
+          ],
+          "titles": [
+            "Analyzing Learned Molecular Representations for Property Prediction"
+          ],
+          "year": 2019,
+          "cited_by_count": 2579
+        }
+      ]
+    },
+    {
+      "id": "protein-structure",
+      "field": "Biology",
+      "question": "protein structure prediction with deep learning",
+      "must_include": [
+        {
+          "title": "Highly accurate protein structure prediction with AlphaFold",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W3177828909"
+          ],
+          "dois": [
+            "10.1038/s41586-021-03819-2"
+          ],
+          "titles": [
+            "Highly accurate protein structure prediction with AlphaFold"
+          ],
+          "year": 2021,
+          "cited_by_count": 51068
+        },
+        {
+          "title": "Accurate structure prediction of biomolecular interactions with AlphaFold 3",
+          "kind": "recent",
+          "openalex_ids": [
+            "W4396721167"
+          ],
+          "dois": [
+            "10.1038/s41586-024-07487-w"
+          ],
+          "titles": [
+            "Accurate structure prediction of biomolecular interactions with AlphaFold 3"
+          ],
+          "year": 2024,
+          "cited_by_count": 19454
+        }
+      ]
+    },
+    {
+      "id": "crispr",
+      "field": "Biology",
+      "question": "CRISPR-Cas9 genome editing",
+      "must_include": [
+        {
+          "title": "A Programmable Dual-RNA–Guided DNA Endonuclease in Adaptive Bacterial Immunity",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2045435533"
+          ],
+          "dois": [
+            "10.1126/science.1225829"
+          ],
+          "titles": [
+            "A Programmable Dual-RNA–Guided DNA Endonuclease in Adaptive Bacterial Immunity"
+          ],
+          "year": 2012,
+          "cited_by_count": 19678
+        },
+        {
+          "title": "Multiplex Genome Engineering Using CRISPR/Cas Systems",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2064815984"
+          ],
+          "dois": [
+            "10.1126/science.1231143"
+          ],
+          "titles": [
+            "Multiplex Genome Engineering Using CRISPR/Cas Systems"
+          ],
+          "year": 2013,
+          "cited_by_count": 16931
+        },
+        {
+          "title": "Search-and-replace genome editing without double-strand breaks or donor DNA",
+          "kind": "recent",
+          "openalex_ids": [
+            "W2981137429"
+          ],
+          "dois": [
+            "10.1038/s41586-019-1711-4"
+          ],
+          "titles": [
+            "Search-and-replace genome editing without double-strand breaks or donor DNA"
+          ],
+          "year": 2019,
+          "cited_by_count": 5405
+        }
+      ]
+    },
+    {
+      "id": "immunotherapy-biomarkers",
+      "field": "Medicine",
+      "question": "biomarkers for predicting response to immune checkpoint inhibitors",
+      "must_include": [
+        {
+          "title": "Mutational landscape determines sensitivity to PD-1 blockade in non–small cell lung cancer",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2049553585"
+          ],
+          "dois": [
+            "10.1126/science.aaa1348"
+          ],
+          "titles": [
+            "Mutational landscape determines sensitivity to PD-1 blockade in non–small cell lung cancer"
+          ],
+          "year": 2015,
+          "cited_by_count": 8486
+        },
+        {
+          "title": "Tumor mutational load predicts survival after immunotherapy across multiple cancer types",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2909679049"
+          ],
+          "dois": [
+            "10.1038/s41588-018-0312-8"
+          ],
+          "titles": [
+            "Tumor mutational load predicts survival after immunotherapy across multiple cancer types"
+          ],
+          "year": 2019,
+          "cited_by_count": 4474
+        }
+      ]
+    },
+    {
+      "id": "mrna-vaccines",
+      "field": "Medicine",
+      "question": "mRNA vaccines efficacy and development",
+      "must_include": [
+        {
+          "title": "Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W3111255098"
+          ],
+          "dois": [
+            "10.1056/nejmoa2034577"
+          ],
+          "titles": [
+            "Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine"
+          ],
+          "year": 2020,
+          "cited_by_count": 16037
+        },
+        {
+          "title": "mRNA vaccines — a new era in vaccinology",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2782708334"
+          ],
+          "dois": [
+            "10.1038/nrd.2017.243"
+          ],
+          "titles": [
+            "mRNA vaccines — a new era in vaccinology"
+          ],
+          "year": 2018,
+          "cited_by_count": 5288
+        }
+      ]
+    },
+    {
+      "id": "perovskite-solar",
+      "field": "Materials",
+      "question": "perovskite solar cells efficiency",
+      "must_include": [
+        {
+          "title": "Organometal Halide Perovskites as Visible-Light Sensitizers for Photovoltaic Cells",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2057327293"
+          ],
+          "dois": [
+            "10.1021/ja809598r"
+          ],
+          "titles": [
+            "Organometal Halide Perovskites as Visible-Light Sensitizers for Photovoltaic Cells"
+          ],
+          "year": 2009,
+          "cited_by_count": 24629
+        },
+        {
+          "title": "Efficient Hybrid Solar Cells Based on Meso-Superstructured Organometal Halide Perovskites",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W1965464747"
+          ],
+          "dois": [
+            "10.1126/science.1228604"
+          ],
+          "titles": [
+            "Efficient Hybrid Solar Cells Based on Meso-Superstructured Organometal Halide Perovskites"
+          ],
+          "year": 2012,
+          "cited_by_count": 11422
+        }
+      ]
+    },
+    {
+      "id": "li-ion-batteries",
+      "field": "Materials",
+      "question": "electrode materials for lithium-ion batteries",
+      "must_include": [
+        {
+          "title": "Building better batteries",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2006318126"
+          ],
+          "dois": [
+            "10.1038/451652a"
+          ],
+          "titles": [
+            "Building better batteries"
+          ],
+          "year": 2008,
+          "cited_by_count": 20680
+        },
+        {
+          "title": "Challenges for Rechargeable Li Batteries",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W3023435578"
+          ],
+          "dois": [
+            "10.1021/cm901452z"
+          ],
+          "titles": [
+            "Challenges for Rechargeable Li Batteries"
+          ],
+          "year": 2009,
+          "cited_by_count": 11673
+        }
+      ]
+    },
+    {
+      "id": "misinformation",
+      "field": "Social science",
+      "question": "spread of misinformation on social media",
+      "must_include": [
+        {
+          "title": "The spread of true and false news online",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2790166049"
+          ],
+          "dois": [
+            "10.1126/science.aap9559"
+          ],
+          "titles": [
+            "The spread of true and false news online"
+          ],
+          "year": 2018,
+          "cited_by_count": 12397
+        },
+        {
+          "title": "The science of fake news",
+          "kind": "foundational",
+          "openalex_ids": [
+            "W2791544114"
+          ],
+          "dois": [
+            "10.1126/science.aao2998"
+          ],
+          "titles": [
+            "The science of fake news"
+          ],
+          "year": 2018,
+          "cited_by_count": 6154
+        }
+      ]
+    }
+  ]
+}

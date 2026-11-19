@@ -1,0 +1,10 @@
+# Dev setup: runtime deps + dev tools + this project as an editable package.
+# Install with: pip install -r requirements-dev.txt
+-r requirements.txt
+pytest==9.2.0
+ruff==0.17.5
+pyyaml==6.0.3   # evals: golden.yaml
+
+# Installs src/research_agent in "editable" mode: code changes apply immediately,
+# and `import research_agent` works from anywhere (CLI, tests, notebooks).
+-e .

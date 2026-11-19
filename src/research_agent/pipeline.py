@@ -1,0 +1,224 @@
+"""
+The fixed research pipeline (Python decides the steps):
+
+    question
+      -> LLM #1 query plan                         ┐
+      -> recent window (user > field pace > default) │ retrieve_reading_list()
+      -> OpenAlex multi-bucket retrieval (parallel)  │  = the RETRIEVAL stage
+      -> dedupe                                      │
+      -> semantic rerank (Gemini embeddings)         │
+      -> balanced selection                        ┘
+      -> LLM #2 synthesis                          -> run_paper_search() = both stages
+      -> SearchResult
+
+Two entry points:
+  retrieve_reading_list()  retrieval only — used by evals to score paper selection
+                           cheaply, and later by LangGraph as separate nodes
+  run_paper_search()       retrieval + synthesis — what the CLI and web app use
+
+No print() or input() here. Progress is reported through `on_step`.
+"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Callable
+from contextlib import AsyncExitStack
+from datetime import date
+
+from research_agent.cache import ResponseCache
+from research_agent.config import Settings, get_settings
+from research_agent.embeddings import Embedder, create_embedder
+from research_agent.llm import create_llm_cache
+from research_agent.models import ReadingList, SearchResult
+from research_agent.planning import generate_query_plan
+from research_agent.retrieval.buckets import retrieve_buckets
+from research_agent.retrieval.recency import resolve_recent_window
+from research_agent.retrieval.rerank import filter_by_similarity, score_papers
+from research_agent.retrieval.selection import deduplicate_papers, select_balanced_papers
+from research_agent.sources.openalex import OpenAlexClient, create_openalex_client
+from research_agent.synthesis import summarize_papers
+
+StepCallback = Callable[[str], None]
+
+
+def _noop(_: str) -> None:
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Public entry points
+# ---------------------------------------------------------------------------
+async def retrieve_reading_list(
+    user_question: str,
+    *,
+    on_step: StepCallback = _noop,
+    settings: Settings | None = None,
+    client: OpenAlexClient | None = None,
+) -> ReadingList:
+    """Retrieval stage only: plan, recent window, buckets, dedupe, rerank, selection."""
+    settings = settings or get_settings()
+    async with AsyncExitStack() as stack:
+        client, llm_cache, embedder = await _open_resources(stack, settings, client)
+        return await _retrieve(user_question, settings, client, llm_cache, embedder, on_step)
+
+
+async def run_paper_search(
+    user_question: str,
+    *,
+    on_step: StepCallback = _noop,
+    settings: Settings | None = None,
+    client: OpenAlexClient | None = None,
+) -> SearchResult:
+    """The full pipeline: retrieval stage + LLM synthesis."""
+    settings = settings or get_settings()
+    started = time.perf_counter()
+
+    async with AsyncExitStack() as stack:
+        client, llm_cache, embedder = await _open_resources(stack, settings, client)
+        reading = await _retrieve(user_question, settings, client, llm_cache, embedder, on_step)
+
+        on_step("\n6) Asking LLM to synthesize the research...")
+        summary = await summarize_papers(
+            user_question,
+            reading.papers,
+            recent_window=reading.recent_window,
+            abstract_chars=settings.abstract_chars_for_llm,
+            cache=llm_cache,
+        )
+        llm_stats = f"hits={llm_cache.hits} misses={llm_cache.misses}" if llm_cache else "off"
+        on_step(f"\nDone in {time.perf_counter() - started:.1f}s  (LLM cache {llm_stats})")
+
+    return SearchResult(
+        user_question=user_question,
+        query_plan=reading.query_plan,
+        recent_window=reading.recent_window,
+        bucket_counts=reading.bucket_counts,
+        unique_candidates=len(reading.candidates),
+        papers=reading.papers,
+        summary=summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Internals
+# ---------------------------------------------------------------------------
+async def _open_resources(
+    stack: AsyncExitStack, settings: Settings, client: OpenAlexClient | None
+) -> tuple[OpenAlexClient, ResponseCache | None, Embedder | None]:
+    """
+    Create what this run needs and register cleanup on the stack.
+
+    AsyncExitStack: if WE create the client, we also close it at the end
+    (even on errors). A client passed in by the caller is left open for them.
+    """
+    if client is None:
+        client = await stack.enter_async_context(create_openalex_client(settings))
+    llm_cache = create_llm_cache(settings)
+    if llm_cache:
+        stack.callback(llm_cache.close)
+    embedder = create_embedder(settings)
+    if embedder:
+        await stack.enter_async_context(embedder)
+    return client, llm_cache, embedder
+
+
+async def _retrieve(
+    user_question: str,
+    settings: Settings,
+    client: OpenAlexClient,
+    llm_cache: ResponseCache | None,
+    embedder: Embedder | None,
+    on_step: StepCallback,
+) -> ReadingList:
+    current_year = date.today().year
+
+    on_step("1) Asking LLM for a search plan...")
+    plan = await generate_query_plan(user_question, current_year=current_year, cache=llm_cache)
+    on_step(f"   relevance query = {plan.search_query}")
+    on_step(f"   core query      = {plan.strict_query}")
+    if plan.alternatives:
+        on_step(f"   alternatives    = {' / '.join(plan.alternatives)}")
+    on_step(f"   reason = {plan.reason}")
+
+    window = resolve_recent_window(
+        plan,
+        user_question,
+        current_year=current_year,
+        default_years=settings.default_recent_years,
+        min_years=settings.min_recent_years,
+        max_years=settings.max_recent_years,
+    )
+    on_step(f"   recent = {window.from_year}-present  [{window.source}] {window.explanation}")
+
+    on_step("\n2) Searching OpenAlex (relevant / recent / highly cited, in parallel)...")
+    t0 = time.perf_counter()
+    before = _counters(client)  # the client may be shared (web app): report THIS run only
+    buckets = await retrieve_buckets(client, plan, window, settings)
+    bucket_counts = {name: len(papers) for name, papers in buckets.items()}
+    for name, count in bucket_counts.items():
+        on_step(f"   {name:<13} = {count}")
+    on_step(f"   took {time.perf_counter() - t0:.1f}s  ({_http_stats(client, before)})")
+
+    on_step("\n3) Deduplicating...")
+    candidates = deduplicate_papers(buckets)
+    on_step(f"   unique candidates = {len(candidates)}")
+
+    shortlist = None
+    if embedder is None:
+        on_step("\n4) Semantic rerank skipped (no GEMINI_API_KEY, or RERANK_ENABLED=false)")
+    else:
+        on_step("\n4) Semantic rerank (Gemini embeddings)...")
+        t0 = time.perf_counter()
+        candidates = await score_papers(
+            user_question, candidates, embedder, doc_chars=settings.embedding_doc_chars
+        )
+        shortlist = filter_by_similarity(
+            candidates,
+            min_similarity=settings.rerank_min_similarity,
+            min_keep=settings.target_final_papers,
+        )
+        on_step(
+            f"   kept {len(shortlist)}/{len(candidates)} with similarity >= "
+            f"{settings.rerank_min_similarity}  (took {time.perf_counter() - t0:.1f}s)"
+        )
+        for p in sorted(candidates, key=lambda p: p.similarity or 0.0)[:3]:
+            on_step(f"   lowest: {p.similarity:.2f} | {p.title or '(untitled)'}")
+
+    on_step("\n5) Selecting a balanced reading list...")
+    selected = select_balanced_papers(
+        shortlist if shortlist is not None else candidates,
+        target_count=settings.target_final_papers,
+        quotas={
+            "relevant": settings.select_relevant,
+            "recent": settings.select_recent,
+            "highly_cited": settings.select_highly_cited,
+        },
+    )
+    for i, p in enumerate(selected, start=1):
+        reasons = ", ".join(p.retrieval_reasons)
+        sim = f"{p.similarity:.2f} | " if p.similarity is not None else ""
+        on_step(f"   [{i:>2}] {p.year or '????'} | {sim}{p.title or '(untitled)'} | {reasons}")
+
+    return ReadingList(
+        query_plan=plan,
+        recent_window=window,
+        bucket_counts=bucket_counts,
+        candidates=candidates,
+        shortlist=shortlist,
+        papers=selected,
+    )
+
+
+def _counters(client: OpenAlexClient) -> tuple[int, int, int]:
+    cache = client.cache
+    return (client.network_requests, cache.hits if cache else 0, cache.misses if cache else 0)
+
+
+def _http_stats(client: OpenAlexClient, before: tuple[int, int, int]) -> str:
+    network, hits, misses = (
+        now - then for now, then in zip(_counters(client), before, strict=True)
+    )
+    if client.cache is None:
+        return f"{network} network requests, cache off"
+    return f"{network} network requests, cache hits={hits} misses={misses}"

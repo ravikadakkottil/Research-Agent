@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research Agent</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --border: #e3e2dc; --accent: #2f5bd3; --accent-text: #ffffff;
+    --log-bg: #f1f0ec; --danger: #b42318;
+    --tag-relevant: #e4ecff; --tag-recent: #e2f5e9; --tag-cited: #fdf0d8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --surface: #1f1f1d; --text: #ecebe6; --muted: #9c9b94;
+      --border: #33332f; --accent: #7d9cf5; --accent-text: #10121a;
+      --log-bg: #191917; --danger: #f97066;
+      --tag-relevant: #26304d; --tag-recent: #1f3a2a; --tag-cited: #3d3220;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 24px 0 8px; text-transform: uppercase;
+       letter-spacing: .04em; color: var(--muted); }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--surface); border: 1px solid var(--border);
+          border-radius: 10px; padding: 16px; margin-top: 16px; }
+  form { display: grid; gap: 12px; }
+  textarea { width: 100%; min-height: 64px; resize: vertical; padding: 10px 12px;
+             font: inherit; color: inherit; background: var(--bg);
+             border: 1px solid var(--border); border-radius: 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg label { padding: 6px 12px; cursor: pointer; }
+  .seg input { display: none; }
+  .seg input:checked + span { color: var(--accent); font-weight: 600; }
+  button { margin-left: auto; padding: 8px 18px; border: 0; border-radius: 8px;
+           background: var(--accent); color: var(--accent-text); font: inherit;
+           font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  details summary { cursor: pointer; color: var(--muted); }
+  pre.log { background: var(--log-bg); border-radius: 8px; padding: 12px; margin: 8px 0 0;
+            max-height: 320px; overflow: auto; font: 12.5px/1.5 ui-monospace, Consolas, monospace;
+            white-space: pre-wrap; }
+  .answer { font-size: 16px; white-space: pre-wrap; }
+  .meta { color: var(--muted); font-size: 13px; }
+  ul { margin: 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  a { color: var(--accent); }
+  .tag { display: inline-block; padding: 1px 8px; margin: 1px 2px; border-radius: 99px; font-size: 12px; }
+  .tag.relevant { background: var(--tag-relevant); }
+  .tag.recent { background: var(--tag-recent); }
+  .tag.highly_cited { background: var(--tag-cited); }
+  .error { color: var(--danger); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Research Agent</h1>
+  <p class="sub">Find relevant, influential and recent papers on a topic, with a grounded summary.
+    API docs: <a href="/docs">/docs</a></p>
+
+  <form id="form" class="card">
+    <textarea id="question" required minlength="3" maxlength="500"
+      placeholder="e.g. immunotherapy response prediction since 2021"></textarea>
+    <div class="row">
+      <div class="seg" role="radiogroup" aria-label="Mode">
+        <label><input type="radio" name="mode" value="search" checked><span>Pipeline</span></label>
+        <label><input type="radio" name="mode" value="agent"><span>Agent</span></label>
+      </div>
+      <label><input type="checkbox" id="fresh"> Fresh results (skip cache)</label>
+      <button id="run" type="submit">Search</button>
+    </div>
+  </form>
+
+  <section id="progress" class="card" hidden>
+    <details id="log-box" open>
+      <summary id="status">Running…</summary>
+      <pre class="log" id="log"></pre>
+    </details>
+  </section>
+
+  <section id="result" hidden></section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let source = null;
+
+// Build elements with textContent (never innerHTML for data from APIs/LLMs).
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v; else node.setAttribute(k, v);
+  }
+  for (const c of children) node.append(c instanceof Node ? c : document.createTextNode(c ?? ""));
+  return node;
+}
+
+function list(items) {
+  return items?.length ? el("ul", {}, ...items.map((t) => el("li", {}, t))) : el("p", { class: "meta" }, "—");
+}
+
+function renderSearch(r) {
+  const s = r.summary, w = r.recent_window;
+  const box = $("result");
+  box.replaceChildren(
+    el("div", { class: "card" },
+      el("p", { class: "answer" }, s.answer),
+      el("p", { class: "meta" },
+        `Query: ${r.query_plan.search_query} · Recent = ${w.from_year}–present (${w.source}: ${w.explanation})`)),
+    el("div", { class: "card" },
+      el("h2", {}, "Foundational findings"), list(s.foundational_findings),
+      el("h2", {}, "Recent developments"), list(s.recent_developments),
+      el("h2", {}, "How the field evolved"), el("p", {}, s.evolution_of_the_field || "—"),
+      el("h2", {}, "Gaps & cautions"), el("p", {}, s.gaps_or_cautions || "—")),
+    el("div", { class: "card" },
+      el("h2", {}, `Reading list (${r.papers.length} of ${r.unique_candidates} candidates)`),
+      el("div", { class: "table-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {},
+          el("th", {}, "Year"), el("th", {}, "Title"), el("th", { class: "num" }, "Cited by"), el("th", {}, "Why"))),
+        el("tbody", {}, ...r.papers.map((p) => {
+          const href = p.doi || p.openalex_id;
+          const title = href ? el("a", { href, target: "_blank", rel: "noopener" }, p.title || "(untitled)")
+                             : (p.title || "(untitled)");
+          return el("tr", {},
+            el("td", {}, String(p.year ?? "")),
+            el("td", {}, title, el("div", { class: "meta" }, [p.authors?.slice(0, 3).join(", "), p.venue].filter(Boolean).join(" · "))),
+            el("td", { class: "num" }, (p.cited_by_count ?? 0).toLocaleString()),
+            el("td", {}, ...p.retrieval_reasons.map((x) => el("span", { class: `tag ${x}` }, x.replace("_", " ")))));
+        }))))),
+  );
+  box.hidden = false;
+}
+
+function renderAgent(r) {
+  $("result").replaceChildren(el("div", { class: "card" }, el("p", { class: "answer" }, r.answer)));
+  $("result").hidden = false;
+}
+
+function finish(statusText, isError = false) {
+  source?.close();          // IMPORTANT: otherwise EventSource auto-reconnects and re-runs the job
+  source = null;
+  $("run").disabled = false;
+  $("status").textContent = statusText;
+  $("status").className = isError ? "error" : "";
+  if (!isError) $("log-box").open = false;
+}
+
+$("form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const question = $("question").value.trim();
+  const mode = document.querySelector("input[name=mode]:checked").value;
+  const params = new URLSearchParams({ question, use_cache: String(!$("fresh").checked) });
+
+  $("run").disabled = true;
+  $("log").textContent = "";
+  $("status").textContent = "Running…";
+  $("status").className = "";
+  $("log-box").open = true;
+  $("progress").hidden = false;
+  $("result").hidden = true;
+
+  // Server-Sent Events: one long response, the server pushes events as they happen.
+  source = new EventSource(`/api/${mode}/stream?${params}`);
+  source.addEventListener("step", (ev) => {
+    $("log").textContent += JSON.parse(ev.data) + "\n";
+    $("log").scrollTop = $("log").scrollHeight;
+  });
+  source.addEventListener("result", (ev) => {
+    const data = JSON.parse(ev.data);
+    mode === "search" ? renderSearch(data) : renderAgent(data);
+    finish("Done — show steps");
+  });
+  source.addEventListener("failure", (ev) => {
+    const { status, detail } = JSON.parse(ev.data);
+    finish(`Error ${status}: ${detail}`, true);
+  });
+  source.onerror = () => { if (source) finish("Connection lost. Is the server running?", true); };
+});
+</script>
+</body>
+</html>

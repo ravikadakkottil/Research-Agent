@@ -1,0 +1,61 @@
+# pyproject.toml — describes the research_agent package + configures dev tools.
+#
+# Two kinds of dependency lists exist in this project, on purpose:
+#   pyproject.toml   [project].dependencies  → what the PACKAGE needs (loose: ">=")
+#   requirements.txt                          → the exact ENVIRONMENT we run/test with ("==")
+#
+# Install everything (venv activated):
+#   pip install -r requirements-dev.txt     # pinned deps + dev tools + this package (editable)
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "research-agent"
+version = "0.4.0"
+description = "Agentic research assistant: finds relevant, influential and recent papers on a topic and summarizes them."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "certifi",
+    "fastapi>=0.115",
+    "google-genai>=3.6",
+    "groq>=1.7",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "python-dotenv>=1.0",
+    "tenacity>=8.2",
+    "uvicorn>=0.30",
+]
+
+# Creates a terminal command: typing `research-agent` runs research_agent.cli:main()
+[project.scripts]
+research-agent = "research_agent.cli:main"
+
+# "src layout": the package lives in src/research_agent. This forces imports to go
+# through the INSTALLED package, so tests behave exactly like real usage.
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Ship the web page with the package (non-.py files aren't included by default).
+[tool.setuptools.package-data]
+research_agent = ["api/static/*"]
+
+# ---------------------------------------------------------------------------
+# Tool settings
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Original lesson scripts are kept as-is for reference; don't lint them.
+extend-exclude = ["lessons"]
+
+[tool.ruff.lint]
+# E/W = style errors, F = real bugs (unused names, undefined vars),
+# I = import sorting, UP = modern Python syntax, B = common bug patterns.
+select = ["E", "W", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

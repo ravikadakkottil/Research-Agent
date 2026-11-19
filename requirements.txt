@@ -1,0 +1,16 @@
+# Runtime dependencies — the exact environment we run with.
+# Pinned with == so every install gets the same versions.
+# Upgrade deliberately: change the number, reinstall, run the tests.
+certifi==2026.10.23
+fastapi==0.163.2
+google-genai==3.6.1
+groq==1.7.0
+httpx==0.28.1
+pydantic==2.14.3
+pydantic-settings==2.16.3
+python-dotenv==1.2.4
+tenacity==9.1.4
+uvicorn==0.54.0
+
+# Only used by the original scripts in lessons/ (the package uses httpx).
+requests==2.34.2
