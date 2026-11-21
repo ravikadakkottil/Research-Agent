@@ -219,3 +219,34 @@ def test_default_scope_is_full_search():
     params = server.requests[0].url.params
     assert params["search"] == "rag"
     assert "filter" not in params
+
+
+# --- citation expansion support ---------------------------------------------------
+def test_parse_work_keeps_short_reference_ids():
+    work = {
+        **SAMPLE_WORK,
+        "referenced_works": ["https://openalex.org/W1", "https://openalex.org/W2"],
+    }
+    assert parse_work(work).referenced_works == ["W1", "W2"]
+
+
+def test_search_asks_for_reference_lists():
+    server = FakeServer(httpx.Response(200, json=OK))
+    asyncio.run(_search(make_client(server), "rag"))
+    assert "referenced_works" in server.requests[0].url.params["select"]
+
+
+def test_get_works_by_ids_uses_one_or_filter_per_chunk(monkeypatch):
+    monkeypatch.setattr("research_agent.sources.openalex.MAX_IDS_PER_REQUEST", 2)
+    server = FakeServer(*(httpx.Response(200, json=OK) for _ in range(2)))
+    client = make_client(server)
+
+    async def go():
+        async with client:
+            return await client.get_works_by_ids(["W1", "https://openalex.org/W2", "W3", "W1"])
+
+    papers = asyncio.run(go())
+
+    filters = sorted(r.url.params["filter"] for r in server.requests)
+    assert filters == ["openalex_id:W1|W2", "openalex_id:W3"]  # deduped, chunked
+    assert len(papers) == 2  # one canned work per response

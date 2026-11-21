@@ -9,14 +9,14 @@
     --bg: #f7f7f5; --surface: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
     --border: #e3e2dc; --accent: #2f5bd3; --accent-text: #ffffff;
     --log-bg: #f1f0ec; --danger: #b42318;
-    --tag-relevant: #e4ecff; --tag-recent: #e2f5e9; --tag-cited: #fdf0d8;
+    --tag-relevant: #e4ecff; --tag-recent: #e2f5e9; --tag-cited: #fdf0d8; --tag-cocited: #f3e5fb;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #161615; --surface: #1f1f1d; --text: #ecebe6; --muted: #9c9b94;
       --border: #33332f; --accent: #7d9cf5; --accent-text: #10121a;
       --log-bg: #191917; --danger: #f97066;
-      --tag-relevant: #26304d; --tag-recent: #1f3a2a; --tag-cited: #3d3220;
+      --tag-relevant: #26304d; --tag-recent: #1f3a2a; --tag-cited: #3d3220; --tag-cocited: #3b2747;
     }
   }
   * { box-sizing: border-box; }
@@ -60,6 +60,7 @@
   .tag.relevant { background: var(--tag-relevant); }
   .tag.recent { background: var(--tag-recent); }
   .tag.highly_cited { background: var(--tag-cited); }
+  .tag.cited_by_top { background: var(--tag-cocited); }
   .error { color: var(--danger); }
   [hidden] { display: none !important; }
 </style>
@@ -137,7 +138,7 @@ function renderSearch(r) {
             el("td", {}, String(p.year ?? "")),
             el("td", {}, title, el("div", { class: "meta" }, [p.authors?.slice(0, 3).join(", "), p.venue].filter(Boolean).join(" · "))),
             el("td", { class: "num" }, (p.cited_by_count ?? 0).toLocaleString()),
-            el("td", {}, ...p.retrieval_reasons.map((x) => el("span", { class: `tag ${x}` }, x.replace("_", " ")))));
+            el("td", {}, ...p.retrieval_reasons.map((x) => el("span", { class: `tag ${x}` }, x.replaceAll("_", " ")))));
         }))))),
   );
   box.hidden = false;

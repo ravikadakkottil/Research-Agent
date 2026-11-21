@@ -16,7 +16,8 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 # The three retrieval perspectives. Literal = only these exact strings are allowed.
-RetrievalReason = Literal["relevant", "recent", "highly_cited"]
+# cited_by_top = found by citation expansion: cited by several of the best candidates.
+RetrievalReason = Literal["relevant", "recent", "highly_cited", "cited_by_top"]
 
 # Extra phrasings searched per question (each costs one OpenAlex search).
 MAX_ALTERNATIVE_QUERIES = 2
@@ -40,6 +41,11 @@ class Paper(BaseModel):
     retrieval_reasons: list[RetrievalReason] = Field(default_factory=list)
     # Meaning-match with the question (cosine, ~0..1). Filled by the semantic rerank.
     similarity: float | None = None
+    # Citation expansion: how many of the top candidates cite this paper.
+    cocited_by: int | None = None
+    # OpenAlex IDs this paper cites (short form, W123). Internal input for citation
+    # expansion; exclude=True keeps it out of API responses / JSON output.
+    referenced_works: list[str] = Field(default_factory=list, exclude=True)
 
 
 # ---------------------------------------------------------------------------

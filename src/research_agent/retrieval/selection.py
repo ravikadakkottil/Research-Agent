@@ -85,6 +85,13 @@ def _key_highly_cited(p: Paper) -> tuple:
     return (p.cited_by_count, _n_reasons(p), p.year or 0)
 
 
+def _key_cited_by_top(p: Paper) -> tuple:
+    # Every paper here already passed the co-citation bar; "cited by the most seeds"
+    # favours whole-field backbones (LSTM for a transformers question). So rank by
+    # how on-topic it is, co-citation count only breaks ties.
+    return (_sim(p), p.cocited_by or 0, p.cited_by_count)
+
+
 def _key_multi(p: Paper) -> tuple:
     return (_n_reasons(p), _sim(p), p.cited_by_count, p.year or 0)
 
@@ -104,7 +111,8 @@ def select_balanced_papers(
       1) up to quotas["relevant"] relevant papers
       2) up to quotas["recent"] recent papers
       3) up to quotas["highly_cited"] highly cited papers
-      4) remaining slots -> papers found by several buckets / strongest leftovers
+      4) up to quotas["cited_by_top"] co-cited papers, most similar to the question first
+      5) remaining slots -> papers found by several buckets / strongest leftovers
 
     "Soft" = if a bucket has fewer papers, we don't force the count.
     """
@@ -126,6 +134,7 @@ def select_balanced_papers(
         "relevant": _key_relevant,
         "recent": _key_recent,
         "highly_cited": _key_highly_cited,
+        "cited_by_top": _key_cited_by_top,
     }
     for reason, key_fn in sort_keys.items():
         in_bucket = [p for p in candidates if reason in p.retrieval_reasons]

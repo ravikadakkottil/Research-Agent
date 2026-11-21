@@ -6,7 +6,9 @@ The fixed research pipeline (Python decides the steps):
       -> recent window (user > field pace > default) │ retrieve_reading_list()
       -> OpenAlex multi-bucket retrieval (parallel)  │  = the RETRIEVAL stage
       -> dedupe                                      │
-      -> semantic rerank (Gemini embeddings)         │
+      -> semantic scoring (Gemini embeddings)        │
+      -> citation expansion (co-cited landmarks)     │
+      -> similarity threshold (rerank)               │
       -> balanced selection                        ┘
       -> LLM #2 synthesis                          -> run_paper_search() = both stages
       -> SearchResult
@@ -30,9 +32,10 @@ from research_agent.cache import ResponseCache
 from research_agent.config import Settings, get_settings
 from research_agent.embeddings import Embedder, create_embedder
 from research_agent.llm import create_llm_cache
-from research_agent.models import ReadingList, SearchResult
+from research_agent.models import Paper, ReadingList, SearchResult
 from research_agent.planning import generate_query_plan
 from research_agent.retrieval.buckets import retrieve_buckets
+from research_agent.retrieval.expansion import expand_by_citations, is_weak_expansion
 from research_agent.retrieval.recency import resolve_recent_window
 from research_agent.retrieval.rerank import filter_by_similarity, score_papers
 from research_agent.retrieval.selection import deduplicate_papers, select_balanced_papers
@@ -78,7 +81,7 @@ async def run_paper_search(
         client, llm_cache, embedder = await _open_resources(stack, settings, client)
         reading = await _retrieve(user_question, settings, client, llm_cache, embedder, on_step)
 
-        on_step("\n6) Asking LLM to synthesize the research...")
+        on_step("\n7) Asking LLM to synthesize the research...")
         summary = await summarize_papers(
             user_question,
             reading.papers,
@@ -164,28 +167,72 @@ async def _retrieve(
     candidates = deduplicate_papers(buckets)
     on_step(f"   unique candidates = {len(candidates)}")
 
-    shortlist = None
-    if embedder is None:
-        on_step("\n4) Semantic rerank skipped (no GEMINI_API_KEY, or RERANK_ENABLED=false)")
-    else:
-        on_step("\n4) Semantic rerank (Gemini embeddings)...")
-        t0 = time.perf_counter()
-        candidates = await score_papers(
-            user_question, candidates, embedder, doc_chars=settings.embedding_doc_chars
+    async def score(papers: list[Paper]) -> list[Paper]:
+        if embedder is None or not papers:
+            return papers
+        return await score_papers(
+            user_question, papers, embedder, doc_chars=settings.embedding_doc_chars
         )
+
+    # Similarity first: expansion picks its seeds by it (most on-topic papers).
+    if embedder is None:
+        on_step("\n4) Semantic scoring skipped (no GEMINI_API_KEY, or RERANK_ENABLED=false)")
+    else:
+        on_step("\n4) Semantic scoring (Gemini embeddings)...")
+        t0 = time.perf_counter()
+        candidates = await score(candidates)
+        on_step(f"   scored {len(candidates)} papers  (took {time.perf_counter() - t0:.1f}s)")
+
+    if settings.citation_expansion_enabled:
+        on_step("\n5) Citation expansion (what do the top papers cite?)...")
+        t0 = time.perf_counter()
+        candidates, new_papers = await expand_by_citations(
+            client,
+            candidates,
+            seed_count=settings.expansion_seed_count,
+            min_citers=settings.expansion_min_citers,
+            max_papers=settings.expansion_max_papers,
+        )
+        new_papers = await score(new_papers)
+        candidates = candidates + new_papers
+        bucket_counts["cited_by_top"] = sum(
+            1 for p in candidates if "cited_by_top" in p.retrieval_reasons
+        )
+        on_step(
+            f"   {bucket_counts['cited_by_top']} co-cited papers, {len(new_papers)} newly fetched"
+            f"  (took {time.perf_counter() - t0:.1f}s)"
+        )
+        for p in new_papers[:5]:
+            on_step(f"   + cited by {p.cocited_by} top papers | {p.title or '(untitled)'}")
+
+    shortlist = None
+    if embedder is not None:
         shortlist = filter_by_similarity(
             candidates,
             min_similarity=settings.rerank_min_similarity,
             min_keep=settings.target_final_papers,
         )
+        # Citation-only papers need a stricter bar (see config: expansion_min_similarity),
+        # unless removing them would leave fewer papers than the reading list needs.
+        weak = {id(p) for p in shortlist if is_weak_expansion(p, settings.expansion_min_similarity)}
+        if weak and len(shortlist) - len(weak) >= settings.target_final_papers:
+            shortlist = [p for p in shortlist if id(p) not in weak]
+        else:
+            weak = set()
         on_step(
-            f"   kept {len(shortlist)}/{len(candidates)} with similarity >= "
-            f"{settings.rerank_min_similarity}  (took {time.perf_counter() - t0:.1f}s)"
+            f"\n   rerank: kept {len(shortlist)}/{len(candidates)} with similarity >= "
+            f"{settings.rerank_min_similarity}"
+            + (
+                f" ({len(weak)} citation-only papers below "
+                f"{settings.expansion_min_similarity} removed)"
+                if weak
+                else ""
+            )
         )
         for p in sorted(candidates, key=lambda p: p.similarity or 0.0)[:3]:
             on_step(f"   lowest: {p.similarity:.2f} | {p.title or '(untitled)'}")
 
-    on_step("\n5) Selecting a balanced reading list...")
+    on_step("\n6) Selecting a balanced reading list...")
     selected = select_balanced_papers(
         shortlist if shortlist is not None else candidates,
         target_count=settings.target_final_papers,
@@ -193,6 +240,7 @@ async def _retrieve(
             "relevant": settings.select_relevant,
             "recent": settings.select_recent,
             "highly_cited": settings.select_highly_cited,
+            "cited_by_top": settings.select_cited_by_top,
         },
     )
     for i, p in enumerate(selected, start=1):

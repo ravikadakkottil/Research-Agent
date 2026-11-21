@@ -24,6 +24,9 @@ database and Gemini embeddings. Retrieval quality is measured with an evaluation
 - **Adaptive "recent" window:** respects time ranges in the question ("since 2020",
   "last 5 years"). Otherwise it adapts to how fast the field moves (LLM research: 1–2 years;
   clinical medicine: 4–6).
+- **Citation expansion:** landmark papers that don't use the topic's keywords are found
+  through the reference lists of the best results. *The spread of true and false news
+  online* never says "misinformation", but the field's top papers all cite it.
 - **Semantic rerank:** candidates are scored by meaning against the question with
   `gemini-embedding-001`, so keyword collisions ("diffusion **models**" vs "diffusion of
   innovations") are filtered out.
@@ -47,9 +50,12 @@ Retrieval quality on the golden set (13 topics × 3 runs, judged by `gpt-oss-120
 | Baseline (single keyword query) | 0.42 | 0.49 | 0.19 |
 | + title/abstract scope, citation-sorted recent bucket | 0.19 | 0.72 | 0.60 |
 | + short core query and alternative phrasings | 0.53 | 0.65 | 0.41 |
-| **+ semantic rerank (current)** | **0.58** | **0.79** | **0.62** |
+| + semantic rerank | 0.58 | 0.79 | 0.62 |
+| + citation expansion | 0.71 | 0.76 | 0.58 |
+| **+ similarity-ordered citation picks (current)** | **0.78** | **0.80** | **0.58** |
 
-Run-to-run spread is ≤ 0.06, so every change in the final row is beyond noise.
+For the current version, run-to-run spread on these metrics is ≤ 0.04. Citation expansion
+raised the share of must-include papers that are retrieved at all from 0.65 to 0.90+.
 
 ## How it works
 
@@ -62,7 +68,9 @@ question
         recent        title+abstract, inside the window, ranked by citations
         highly cited  title+abstract, core query + alternatives, ranked by citations
   → dedupe (DOI / OpenAlex ID / title)
-  → semantic rerank (Gemini embeddings, cosine similarity threshold)
+  → semantic scoring (Gemini embeddings, cosine similarity to the question)
+  → citation expansion: papers cited by ≥ 3 of the top 15 candidates
+  → similarity threshold (drops off-topic papers; stricter for citation-only papers)
   → balanced selection (quotas per perspective)
   → LLM: grounded synthesis (validated JSON)
 ```
@@ -128,6 +136,9 @@ All settings live in `src/research_agent/config.py` and can be overridden in `.e
 | `TARGET_FINAL_PAPERS` | `12` | reading-list size |
 | `RERANK_ENABLED` | `true` | semantic rerank on/off |
 | `RERANK_MIN_SIMILARITY` | `0.66` | similarity threshold (calibrated on the golden set) |
+| `CITATION_EXPANSION_ENABLED` | `true` | citation expansion on/off |
+| `EXPANSION_MIN_CITERS` | `3` | top papers that must cite a paper before it's added |
+| `EXPANSION_MIN_SIMILARITY` | `0.68` | stricter similarity bar for papers found only through citations |
 | `CACHE_TTL_HOURS` | `24` | API / LLM response cache lifetime |
 | `HTTP_MAX_CONCURRENCY` | `5` | parallel OpenAlex requests |
 
@@ -144,7 +155,7 @@ python evals/compare.py evals/results/A.json evals/results/B.json
 | `recall` | must-include papers (from `evals/golden.yaml`) present in the final list |
 | `candidate_recall` / `shortlist_recall` | the same, after retrieval / after rerank: locates where papers are lost |
 | `precision` | share of the final list an LLM judge rates relevant to the question |
-| `recent_precision` | precision of the papers chosen as "recent" |
+| `recent_precision` / `expansion_precision` | precision of the papers chosen as "recent" / via citation expansion |
 | `grounding` | summary citations that exist in the reading list (`--mode full`) |
 
 Each run is repeated to measure natural LLM variance. `compare.py` marks differences
@@ -174,7 +185,7 @@ tests/
 
 ## Roadmap
 
-- [ ] Citation-graph expansion (pull in landmark papers that top results cite)
+- [x] Citation-graph expansion (pull in landmark papers that top results cite)
 - [ ] Semantic Scholar as a second source
 - [ ] LangGraph orchestration + Langfuse tracing
 - [ ] Deep-research mode (planner + parallel sub-researchers)

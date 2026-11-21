@@ -40,6 +40,7 @@ class PaperRecord(BaseModel):
     cited_by_count: int
     reasons: list[str]
     similarity: float | None = None
+    cocited_by: int | None = None
     relevant: bool | None  # None = judge gave no verdict
     judge_reason: str = ""
     is_golden: bool
@@ -57,6 +58,7 @@ class RunMetrics(BaseModel):
     recall_recent: float | None = None
     precision: float | None = None
     recent_precision: float | None = None
+    expansion_precision: float | None = None  # papers chosen via "cited_by_top"
     grounding: float | None = None
 
     recent_median_citations: float | None = None
@@ -69,6 +71,7 @@ class RunMetrics(BaseModel):
     missed: list[str] = []  # must-haves not in the final list
     dropped_in_rerank: list[str] = []  # must-haves retrieved but below the similarity threshold
     dropped_in_selection: list[str] = []  # must-haves in the selection pool but not chosen
+    found_by_expansion: list[str] = []  # must-haves retrieved ONLY by citation expansion
     papers: list[PaperRecord] = []
 
 
@@ -118,6 +121,8 @@ def evaluate_run(
         return _ratio([f for g, f in zip(golden, in_final, strict=True) if g.kind == kind])
 
     recent_papers = [p for p in reading.papers if "recent" in p.retrieval_reasons]
+    expansion_papers = [p for p in reading.papers if "cited_by_top" in p.retrieval_reasons]
+    expansion_only = [p for p in reading.candidates if p.retrieval_reasons == ["cited_by_top"]]
     recent_citations = [p.cited_by_count for p in recent_papers]
 
     records = []
@@ -130,6 +135,7 @@ def evaluate_run(
                 cited_by_count=p.cited_by_count,
                 reasons=list(p.retrieval_reasons),
                 similarity=p.similarity,
+                cocited_by=p.cocited_by,
                 relevant=verdict.relevant if verdict else None,
                 judge_reason=verdict.reason if verdict else "",
                 is_golden=any(g.matches(p) for g in golden),
@@ -147,6 +153,7 @@ def evaluate_run(
         recall_recent=recall_of("recent"),
         precision=_precision(reading.papers, verdicts),
         recent_precision=_precision(recent_papers, verdicts),
+        expansion_precision=_precision(expansion_papers, verdicts),
         grounding=_grounding(summary, reading.papers) if summary else None,
         recent_median_citations=median(recent_citations) if recent_citations else None,
         future_dated=sum(1 for p in reading.papers if (p.year or 0) > current_year),
@@ -165,5 +172,6 @@ def evaluate_run(
             for g, final, pool in zip(golden, in_final, in_pool, strict=True)
             if pool and not final
         ],
+        found_by_expansion=[g.title for g in golden if any(g.matches(p) for p in expansion_only)],
         papers=records,
     )

@@ -109,6 +109,24 @@ def test_rerank_and_selection_drops_are_told_apart():
     assert m.dropped_in_selection == ["RAG survey"]
 
 
+def test_expansion_metrics():
+    # RAG found ONLY via citation expansion; an off-topic expansion pick lowers its precision
+    rag = Paper(openalex_id="W3027879771", title="RAG", retrieval_reasons=["cited_by_top"])
+    junk = Paper(openalex_id="W8", title="Adam", retrieval_reasons=["cited_by_top"])
+    survey = Paper(openalex_id="W4389984066", retrieval_reasons=["relevant", "cited_by_top"])
+    reading = make_reading([rag, junk, survey])
+    verdicts = {
+        paper_identity(rag): Verdict(relevant=True),
+        paper_identity(junk): Verdict(relevant=False),
+        paper_identity(survey): Verdict(relevant=True),
+    }
+
+    m = evaluate_run(TOPIC, 1, reading, verdicts, current_year=2026)
+
+    assert m.found_by_expansion == [RAG.title]  # survey was also found by keyword search
+    assert m.expansion_precision == 2 / 3
+
+
 def test_future_dated_papers_are_counted():
     reading = make_reading([Paper(openalex_id="W1", year=2027), Paper(openalex_id="W2", year=2025)])
     assert evaluate_run(TOPIC, 1, reading, {}, current_year=2026).future_dated == 1

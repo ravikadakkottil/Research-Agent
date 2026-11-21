@@ -83,9 +83,12 @@ class Settings(BaseSettings):
 
     # --- Selection (final reading list for the summarizer) -------------------
     target_final_papers: int = 12
-    select_relevant: int = 4
+    # Quotas sum to target_final_papers. cited_by_top got a 3rd slot (from relevant)
+    # in fix 6: once ordered by similarity, co-cited landmarks were the best picks.
+    select_relevant: int = 3
     select_recent: int = 3
     select_highly_cited: int = 3
+    select_cited_by_top: int = 3
     # Abstract characters sent to the summarizer per paper (keeps prompt small).
     abstract_chars_for_llm: int = 800
 
@@ -104,6 +107,21 @@ class Settings(BaseSettings):
     #   must-have papers 0.71-0.81 | judged relevant: median 0.73 | off-topic: median 0.65
     #   0.66 keeps all must-haves + 97% of relevant papers, removes 54% of off-topic ones.
     rerank_min_similarity: float = 0.66
+    # --- Citation expansion ("snowballing") ----------------------------------
+    # Landmarks often don't use the topic's keywords ("The spread of true and false
+    # news online" never says "misinformation"), but the best papers on the topic
+    # CITE them. Count references among the top candidates; fetch the ones cited
+    # by at least expansion_min_citers of them.
+    citation_expansion_enabled: bool = True
+    expansion_seed_count: int = 15  # top candidates whose reference lists are read
+    expansion_min_citers: int = 3  # cited by >= this many seeds -> worth fetching
+    expansion_max_papers: int = 10  # at most this many new papers per question
+    # Papers found ONLY by expansion must clear a stricter similarity bar than the
+    # rerank threshold: whole-field "backbone" papers (LSTM, Qwen2.5, CoT for a
+    # tool-use question) are co-cited too, and scored 0.66-0.68 in the fix 5 eval,
+    # while expansion-found must-haves scored >= 0.69.
+    expansion_min_similarity: float = 0.68
+
     # Embeddings of the same text never change, so they're cached long and even in
     # evals (unlike LLM answers, caching them adds no bias).
     embedding_cache_enabled: bool = True

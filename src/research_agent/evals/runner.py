@@ -42,6 +42,7 @@ METRICS = [
     "recall_recent",
     "precision",
     "recent_precision",
+    "expansion_precision",
     "grounding",
 ]
 
@@ -196,6 +197,12 @@ def build_report(
                 "embedding_model",
                 "embedding_dimensions",
                 "rerank_min_similarity",
+                "citation_expansion_enabled",
+                "expansion_seed_count",
+                "expansion_min_citers",
+                "expansion_max_papers",
+                "expansion_min_similarity",
+                "select_cited_by_top",
             }
         ),
     }
@@ -230,6 +237,7 @@ def format_report(report: EvalReport) -> str:
     lines.append(
         f"recall foundational={_fmt(extra['recall_foundational']['mean'])}  "
         f"recall recent={_fmt(extra['recall_recent']['mean'])}  "
+        f"expansion precision={_fmt(extra['expansion_precision']['mean'])}  "
         f"grounding={_fmt(extra['grounding']['mean'])}  "
         f"failed runs={report.meta['failed_runs']}  "
         f"mean latency={report.meta['mean_latency_s']}s  "

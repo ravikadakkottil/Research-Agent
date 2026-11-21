@@ -33,6 +33,12 @@ from research_agent.models import Paper
 # Fields we ask OpenAlex for. Smaller responses = faster + cheaper.
 BASE_FIELDS = "id,doi,display_name,publication_year,cited_by_count,authorships,primary_location"
 FIELDS_WITH_ABSTRACT = BASE_FIELDS + ",abstract_inverted_index"
+# Searches also return each paper's reference list (outgoing citations), used by
+# citation expansion. Same single request, just a bigger response.
+SEARCH_FIELDS = FIELDS_WITH_ABSTRACT + ",referenced_works"
+
+# OpenAlex accepts up to 100 values in one OR filter (W1|W2|...); stay well under.
+MAX_IDS_PER_REQUEST = 50
 
 # A 429 asking us to wait at most this long is a short burst limit -> retry.
 # Longer (or no Retry-After) means the daily budget is gone -> fail fast.
@@ -97,6 +103,7 @@ def parse_work(work: dict[str, Any], *, include_abstract: bool = True) -> Paper:
         venue=venue,
         doi=work.get("doi"),
         abstract=abstract,
+        referenced_works=[short_id(r) for r in (work.get("referenced_works") or []) if r],
     )
 
 
@@ -272,7 +279,7 @@ class OpenAlexClient:
         params: dict[str, Any] = {
             "per_page": per_page,
             "sort": sort,
-            "select": FIELDS_WITH_ABSTRACT if include_abstract else BASE_FIELDS,
+            "select": SEARCH_FIELDS if include_abstract else BASE_FIELDS,
         }
         filter_parts = [filters] if filters else []
         if scope == "title_abstract":
@@ -305,6 +312,28 @@ class OpenAlexClient:
             },
         )
         return [parse_work(w, include_abstract=False) for w in payload.get("results", [])]
+
+    async def get_works_by_ids(self, paper_ids: list[str]) -> list[Paper]:
+        """
+        Fetch many works (with abstracts) by OpenAlex ID, using an OR filter:
+        one request per MAX_IDS_PER_REQUEST IDs instead of one per paper.
+        """
+        ids = list(dict.fromkeys(normalize_paper_id(i) for i in paper_ids))  # dedupe, keep order
+        chunks = [ids[i : i + MAX_IDS_PER_REQUEST] for i in range(0, len(ids), MAX_IDS_PER_REQUEST)]
+        payloads = await asyncio.gather(
+            *(
+                self._get(
+                    "/works",
+                    {
+                        "filter": f"openalex_id:{'|'.join(chunk)}",
+                        "per_page": len(chunk),
+                        "select": FIELDS_WITH_ABSTRACT,
+                    },
+                )
+                for chunk in chunks
+            )
+        )
+        return [parse_work(w) for payload in payloads for w in payload.get("results", [])]
 
     async def get_referenced_works(self, paper_id: str, limit: int) -> list[Paper]:
         """Papers this one CITES (its bibliography / outgoing references)."""

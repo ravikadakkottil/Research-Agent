@@ -61,7 +61,9 @@ The papers you receive may include:
 - papers that are both recent and influential
 
 Each paper may include "retrieval_reasons" such as:
-["relevant"], ["recent"], ["highly_cited"], or combinations.
+["relevant"], ["recent"], ["highly_cited"], ["cited_by_top"], or combinations.
+"cited_by_top" means many of the other papers in the set cite it: usually a
+foundational work for this topic.
 
 Important rules:
 - Newer papers are NOT automatically better.
