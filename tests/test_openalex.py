@@ -250,3 +250,21 @@ def test_get_works_by_ids_uses_one_or_filter_per_chunk(monkeypatch):
     filters = sorted(r.url.params["filter"] for r in server.requests)
     assert filters == ["openalex_id:W1|W2", "openalex_id:W3"]  # deduped, chunked
     assert len(papers) == 2  # one canned work per response
+
+
+def test_get_works_by_dois_normalizes_dedupes_and_skips_unsafe():
+    server = FakeServer(httpx.Response(200, json=OK))
+    client = make_client(server)
+
+    async def go():
+        async with client:
+            return await client.get_works_by_dois(
+                ["10.1/ABC", "https://doi.org/10.1/abc", "10.2/x,y", "10.3/z"]
+            )
+
+    asyncio.run(go())
+
+    params = server.requests[0].url.params
+    # same DOI twice (case differs) -> once; "," would break the filter -> skipped
+    assert params["filter"] == "doi:https://doi.org/10.1/abc|https://doi.org/10.3/z"
+    assert "referenced_works" in params["select"]  # needed by citation expansion

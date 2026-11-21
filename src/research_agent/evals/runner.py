@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+from collections import Counter
 from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
@@ -181,6 +182,9 @@ def build_report(
         "reranked": any(r.shortlist_recall is not None for r in ok),
         "mean_latency_s": round(mean(r.latency_s for r in ok), 2) if ok else None,
         "openalex_requests": sum(r.openalex_requests for r in results),
+        # ok / skipped / failed counts: a "no gain" from Europe PMC only means
+        # something if it actually answered.
+        "europepmc": dict(Counter((r.europepmc or "off").split(" (")[0] for r in ok)),
         "judge": {"model": judge.model, "version": JUDGE_VERSION, "llm_calls": judge.llm_calls},
         "settings": settings.model_dump(
             include={
@@ -202,6 +206,9 @@ def build_report(
                 "expansion_min_citers",
                 "expansion_max_papers",
                 "expansion_min_similarity",
+                "europepmc_enabled",
+                "europepmc_count",
+                "europepmc_timeout_seconds",
                 "select_cited_by_top",
             }
         ),
@@ -243,6 +250,7 @@ def format_report(report: EvalReport) -> str:
         f"mean latency={report.meta['mean_latency_s']}s  "
         f"OpenAlex requests={report.meta['openalex_requests']}"
     )
+    lines.append(f"Europe PMC runs: {report.meta.get('europepmc') or {}}")
     return "\n".join(lines)
 
 

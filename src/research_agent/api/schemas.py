@@ -10,15 +10,18 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from research_agent.models import AgentResult
+
 
 class QuestionRequest(BaseModel):
     question: str = Field(min_length=3, max_length=500, examples=["CRISPR delivery since 2020"])
     use_cache: bool = Field(default=True, description="false = fresh OpenAlex + LLM results")
 
 
-class AgentAnswer(BaseModel):
+class AgentAnswer(AgentResult):
+    """Agent answer (Markdown) + verified sources + IDs no tool returned."""
+
     question: str
-    answer: str
 
 
 class ErrorBody(BaseModel):

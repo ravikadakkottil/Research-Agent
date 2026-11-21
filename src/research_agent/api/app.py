@@ -184,10 +184,10 @@ async def agent(body: QuestionRequest, request: Request) -> AgentAnswer:
     """Run the tool-calling agent (the LLM decides which OpenAlex tools to use)."""
     settings, _ = _request_settings(request, body.use_cache)
     try:
-        answer = await run_tool_agent(body.question, settings=settings)
+        result = await run_tool_agent(body.question, settings=settings)
     except Exception as exc:
         raise _to_http_error(exc) from exc
-    return AgentAnswer(question=body.question, answer=answer)
+    return AgentAnswer(question=body.question, **result.model_dump())
 
 
 @app.get("/api/search/stream", tags=["streaming"])
@@ -216,7 +216,7 @@ async def agent_stream(
     settings, _ = _request_settings(request, use_cache)
 
     async def run(on_step: StepCallback) -> dict[str, Any]:
-        answer = await run_tool_agent(question, on_step=on_step, settings=settings)
-        return {"question": question, "answer": answer}
+        result = await run_tool_agent(question, on_step=on_step, settings=settings)
+        return AgentAnswer(question=question, **result.model_dump()).model_dump(mode="json")
 
     return _sse_response(_stream_run(run))

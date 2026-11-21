@@ -335,6 +335,34 @@ class OpenAlexClient:
         )
         return [parse_work(w) for payload in payloads for w in payload.get("results", [])]
 
+    async def get_works_by_dois(self, dois: list[str]) -> list[Paper]:
+        """
+        Fetch many works by DOI (OR filter, one request per MAX_IDS_PER_REQUEST).
+        Returns search-style records (with reference lists, for citation expansion).
+        DOIs containing "," or "|" would break the filter syntax and are skipped.
+        """
+        clean = [normalize_paper_id(d) for d in dois if d and not set(d) & {",", "|"}]
+        clean = list(
+            dict.fromkeys(d.lower() for d in clean if d.lower().startswith("https://doi.org/"))
+        )
+        chunks = [
+            clean[i : i + MAX_IDS_PER_REQUEST] for i in range(0, len(clean), MAX_IDS_PER_REQUEST)
+        ]
+        payloads = await asyncio.gather(
+            *(
+                self._get(
+                    "/works",
+                    {
+                        "filter": f"doi:{'|'.join(chunk)}",
+                        "per_page": len(chunk),
+                        "select": SEARCH_FIELDS,
+                    },
+                )
+                for chunk in chunks
+            )
+        )
+        return [parse_work(w) for payload in payloads for w in payload.get("results", [])]
+
     async def get_referenced_works(self, paper_id: str, limit: int) -> list[Paper]:
         """Papers this one CITES (its bibliography / outgoing references)."""
         parent = await self._get(work_path(paper_id), {"select": "id,referenced_works"})

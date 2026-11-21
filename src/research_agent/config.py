@@ -127,6 +127,15 @@ class Settings(BaseSettings):
     embedding_cache_enabled: bool = True
     embedding_cache_days: float = 90.0
 
+    # --- Europe PMC (second source, biomedical questions only) ------------------
+    # OpenAlex has no abstracts for some publishers, so landmarks whose TITLE doesn't
+    # name the topic are never found. Europe PMC searches PubMed abstracts + full text.
+    # Slow and variable (1-30 s), so it has a hard time limit and is fail-soft.
+    europepmc_enabled: bool = True
+    europepmc_base_url: str = "https://www.ebi.ac.uk/europepmc/webservices/rest"
+    europepmc_count: int = 25  # most-cited matches taken from Europe PMC
+    europepmc_timeout_seconds: float = 20.0  # whole step (search + OpenAlex lookup)
+
     # --- Web app (python main.py) ---------------------------------------------
     # 127.0.0.1 = only reachable from this computer (safe default on an office network).
     api_host: str = "127.0.0.1"

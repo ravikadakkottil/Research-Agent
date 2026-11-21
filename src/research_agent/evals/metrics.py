@@ -14,7 +14,9 @@ Metrics (all 0..1, higher is better, None = not applicable):
   recent_precision     same, but only for papers chosen via the "recent" bucket
   grounding            summary's papers_used that really are in the list (full mode)
 
-Plus diagnostics: recent-bucket median citations, future-dated papers, latency.
+Plus diagnostics: recent-bucket median citations, future-dated papers, latency,
+what the Europe PMC search did, and which must-haves only it (or only citation
+expansion) found.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ class PaperRecord(BaseModel):
     reasons: list[str]
     similarity: float | None = None
     cocited_by: int | None = None
+    europepmc_only: bool = False
     relevant: bool | None  # None = judge gave no verdict
     judge_reason: str = ""
     is_golden: bool
@@ -72,6 +75,8 @@ class RunMetrics(BaseModel):
     dropped_in_rerank: list[str] = []  # must-haves retrieved but below the similarity threshold
     dropped_in_selection: list[str] = []  # must-haves in the selection pool but not chosen
     found_by_expansion: list[str] = []  # must-haves retrieved ONLY by citation expansion
+    found_by_europepmc: list[str] = []  # must-haves retrieved ONLY by the Europe PMC search
+    europepmc: str | None = None  # "ok (25 papers)" / "skipped (...)" / "failed (...)" / "off"
     papers: list[PaperRecord] = []
 
 
@@ -123,6 +128,7 @@ def evaluate_run(
     recent_papers = [p for p in reading.papers if "recent" in p.retrieval_reasons]
     expansion_papers = [p for p in reading.papers if "cited_by_top" in p.retrieval_reasons]
     expansion_only = [p for p in reading.candidates if p.retrieval_reasons == ["cited_by_top"]]
+    europepmc_only = [p for p in reading.candidates if p.europepmc_only]
     recent_citations = [p.cited_by_count for p in recent_papers]
 
     records = []
@@ -136,6 +142,7 @@ def evaluate_run(
                 reasons=list(p.retrieval_reasons),
                 similarity=p.similarity,
                 cocited_by=p.cocited_by,
+                europepmc_only=p.europepmc_only,
                 relevant=verdict.relevant if verdict else None,
                 judge_reason=verdict.reason if verdict else "",
                 is_golden=any(g.matches(p) for g in golden),
@@ -173,5 +180,7 @@ def evaluate_run(
             if pool and not final
         ],
         found_by_expansion=[g.title for g in golden if any(g.matches(p) for p in expansion_only)],
+        found_by_europepmc=[g.title for g in golden if any(g.matches(p) for p in europepmc_only)],
+        europepmc=reading.europepmc_status,
         papers=records,
     )

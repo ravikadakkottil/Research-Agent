@@ -46,6 +46,8 @@ class Paper(BaseModel):
     # OpenAlex IDs this paper cites (short form, W123). Internal input for citation
     # expansion; exclude=True keeps it out of API responses / JSON output.
     referenced_works: list[str] = Field(default_factory=list, exclude=True)
+    # True when ONLY the Europe PMC search found it (no OpenAlex bucket did).
+    europepmc_only: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +79,9 @@ class QueryPlan(BaseModel):
     # Option 2 — the LLM's judgement of how fast this field moves.
     suggested_recent_years: int | None = None
     time_reason: str = ""
+
+    # Biology / medicine / health topic -> also search Europe PMC (Step 5c).
+    biomedical: bool = False
 
     @field_validator("core_query", "search_query")
     @classmethod
@@ -171,6 +176,8 @@ class ReadingList(BaseModel):
     # Candidates that passed the semantic rerank; None = rerank skipped.
     shortlist: list[Paper] | None = None
     papers: list[Paper]  # the balanced final selection
+    # What the Europe PMC search did: "ok (25 papers)", "skipped (...)", "failed (...)", "off".
+    europepmc_status: str | None = None
 
     @property
     def selection_pool(self) -> list[Paper]:
@@ -189,3 +196,16 @@ class SearchResult(BaseModel):
     unique_candidates: int
     papers: list[Paper]
     summary: ResearchSummary
+
+
+# ---------------------------------------------------------------------------
+# Tool-calling agent output
+# ---------------------------------------------------------------------------
+class AgentResult(BaseModel):
+    """The agent's free-text answer plus the grounding check of its citations."""
+
+    answer: str  # Markdown, papers cited as [W123]
+    # Papers the answer cites that a tool really returned (real title/year/citations).
+    sources: list[Paper] = Field(default_factory=list)
+    # IDs cited in the answer that no tool returned: invented or from memory.
+    unverified_ids: list[str] = Field(default_factory=list)

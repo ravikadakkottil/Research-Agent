@@ -55,8 +55,16 @@ def deduplicate_papers(buckets: dict[RetrievalReason, list[Paper]]) -> list[Pape
             if key not in merged:
                 # model_copy: don't mutate the bucket's object; fresh reasons list.
                 merged[key] = paper.model_copy(update={"retrieval_reasons": [reason]})
-            elif reason not in merged[key].retrieval_reasons:
-                merged[key].retrieval_reasons.append(reason)
+                continue
+            kept = merged[key]
+            if reason not in kept.retrieval_reasons:
+                kept.retrieval_reasons.append(reason)
+            # Found by an OpenAlex search too -> not a Europe-PMC-only find.
+            kept.europepmc_only = kept.europepmc_only and paper.europepmc_only
+            # A record without abstract takes one from its duplicate (Europe PMC
+            # often has abstracts that OpenAlex lacks).
+            if not kept.abstract and paper.abstract:
+                kept.abstract = paper.abstract
     return list(merged.values())
 
 

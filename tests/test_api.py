@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from research_agent.api import app as app_module
 from research_agent.models import (
+    AgentResult,
     Paper,
     QueryPlan,
     RecentWindow,
@@ -39,7 +40,11 @@ async def fake_search(question, *, on_step=lambda _: None, settings=None, client
 
 async def fake_agent(question, *, on_step=lambda _: None, settings=None):
     on_step("--- Agent step 1 ---")
-    return f"Agent answer to: {question}"
+    return AgentResult(
+        answer=f"Agent answer to: {question} [W1] [W999]",
+        sources=[Paper(openalex_id="https://openalex.org/W1", title="Real paper")],
+        unverified_ids=["W999"],
+    )
 
 
 async def failing_search(question, **kwargs):
@@ -82,9 +87,18 @@ def test_search_validates_input(client):
     assert client.post("/api/search", json={"question": "x"}).status_code == 422  # too short
 
 
-def test_agent_returns_answer(client):
-    response = client.post("/api/agent", json={"question": "find attention papers"})
-    assert response.json()["answer"] == "Agent answer to: find attention papers"
+def test_agent_returns_answer_with_checked_sources(client):
+    body = client.post("/api/agent", json={"question": "find attention papers"}).json()
+    assert body["answer"] == "Agent answer to: find attention papers [W1] [W999]"
+    assert [s["title"] for s in body["sources"]] == ["Real paper"]
+    assert body["unverified_ids"] == ["W999"]
+
+
+def test_agent_stream_result_includes_sources(client):
+    response = client.get("/api/agent/stream", params={"question": "find attention papers"})
+    events = dict(parse_sse(response.text))
+    assert events["result"]["question"] == "find attention papers"
+    assert events["result"]["unverified_ids"] == ["W999"]
 
 
 def test_rate_limit_maps_to_429(client, monkeypatch):

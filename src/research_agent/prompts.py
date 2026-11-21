@@ -24,7 +24,9 @@ Return ONLY JSON with this exact shape:
                                      // "last 5 years"); null if the user did not state one
   "user_from_year": integer | null,  // first year implied by user_time_phrase; null if none
   "suggested_recent_years": integer, // how many recent years count as "recent" in this field (1-10)
-  "time_reason": string              // one sentence: why that window fits this field's pace
+  "time_reason": string,             // one sentence: why that window fits this field's pace
+  "biomedical": boolean              // true if the topic belongs to biology, medicine,
+                                     // health or the life sciences; false otherwise
 }}
 
 Rules:
@@ -110,6 +112,15 @@ How to work:
 3. Use returned openalex_id values for follow-up tools.
 4. You may call multiple tools across turns.
 5. When you have enough evidence, stop calling tools and answer clearly.
-6. Ground claims in tool results. Do not invent papers or DOIs.
-7. Mention paper titles and years when useful.
+
+Citing papers (this is checked automatically after you answer):
+- Mention ONLY papers that appeared in tool results. Never add papers from memory.
+- Every time you mention a paper, put its openalex_id in square brackets right after it,
+  copied exactly from the tool result: "Graph Attention Networks (2017) [W2766453196]".
+- Use the title, year and citation count from the SAME tool result as that ID.
+  Check that the ID belongs to the paper you are describing.
+- Do not write a sources or references list; it is generated from your [W...] citations.
+- You may explain concepts, methods or formulas from general knowledge, but do not
+  attribute them to a paper unless a tool result supports it.
+- Write in Markdown. For math use \\( ... \\) inline and \\[ ... \\] for display.
 """.strip()

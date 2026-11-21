@@ -50,7 +50,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _clear_cache(settings: Settings) -> None:
-    for name in ("openalex.sqlite", "llm.sqlite", "embeddings.sqlite"):
+    for name in ("openalex.sqlite", "europepmc.sqlite", "llm.sqlite", "embeddings.sqlite"):
         path = settings.cache_dir / name
         cache = ResponseCache(path, ttl_seconds=0)
         cache.clear()
@@ -60,8 +60,15 @@ def _clear_cache(settings: Settings) -> None:
 
 async def _run(question: str, *, agent: bool, settings: Settings) -> None:
     if agent:
-        answer = await run_tool_agent(question, on_step=print, settings=settings)
-        print(f"\n{RULE}\nFINAL ANSWER\n{RULE}\n{answer}")
+        result = await run_tool_agent(question, on_step=print, settings=settings)
+        print(f"\n{RULE}\nFINAL ANSWER\n{RULE}\n{result.answer}")
+        print(f"\n{RULE}\nSOURCES (checked against tool results)\n{RULE}")
+        for p in result.sources:
+            print(f"- {p.title} ({p.year}) · cited by {p.cited_by_count} · {p.openalex_id}")
+        if not result.sources:
+            print("- none: the answer cites no papers from the tools (general background only)")
+        if result.unverified_ids:
+            print(f"! Unverified IDs (no tool returned them): {', '.join(result.unverified_ids)}")
         return
 
     print()

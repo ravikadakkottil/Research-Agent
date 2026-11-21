@@ -5,6 +5,7 @@ The agent loop:
         LLM sees messages + tool schemas
         if it returns tool_calls -> run them (in parallel), append results, loop again
         else                     -> that's the final answer
+    then: grounding check (agent/grounding.py) -> cited [W...] IDs become checked sources
 """
 
 from __future__ import annotations
@@ -13,9 +14,11 @@ import asyncio
 from collections.abc import Callable
 from typing import Any
 
+from research_agent.agent.grounding import check_citations
 from research_agent.agent.tools import TOOL_SCHEMAS, AgentTools
 from research_agent.config import Settings, get_settings
 from research_agent.llm import get_client
+from research_agent.models import AgentResult
 from research_agent.prompts import AGENT_PROMPT
 from research_agent.sources.openalex import create_openalex_client
 
@@ -51,7 +54,7 @@ async def run_tool_agent(
     *,
     on_step: Callable[[str], None] = _noop,
     settings: Settings | None = None,
-) -> str:
+) -> AgentResult:
     settings = settings or get_settings()
     llm = get_client()
     messages: list[dict[str, Any]] = [
@@ -75,7 +78,7 @@ async def run_tool_agent(
 
             if not message.tool_calls:
                 on_step("No tool call -> final answer.")
-                return message.content or ""
+                return _grounded(message.content or "", tools, on_step)
 
             calls = message.tool_calls
             on_step(f"Tool selection: {len(calls)} call(s)")
@@ -100,7 +103,19 @@ async def run_tool_agent(
                     }
                 )
 
-    return (
-        "Stopped: reached MAX_AGENT_STEPS without a final answer. "
-        "Try a narrower question, or raise MAX_AGENT_STEPS in .env."
+    return AgentResult(
+        answer=(
+            "Stopped: reached MAX_AGENT_STEPS without a final answer. "
+            "Try a narrower question, or raise MAX_AGENT_STEPS in .env."
+        )
     )
+
+
+def _grounded(answer: str, tools: AgentTools, on_step: Callable[[str], None]) -> AgentResult:
+    """Check the answer's [W...] citations against what the tools actually returned."""
+    sources, unverified = check_citations(answer, tools.seen)
+    on_step(
+        f"Grounding check: {len(sources)} cited paper(s) verified, "
+        f"{len(unverified)} unverified{' ' + ', '.join(unverified) if unverified else ''}"
+    )
+    return AgentResult(answer=answer, sources=sources, unverified_ids=unverified)

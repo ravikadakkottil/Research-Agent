@@ -4,6 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Research Agent</title>
+<!-- Agent answers are Markdown with LaTeX math. Rendered safely:
+     marked (Markdown -> HTML), KaTeX (math), DOMPurify (removes anything executable).
+     Exact versions + integrity hashes: the browser refuses a file that was changed. -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css"
+      integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"
+        integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"
+        integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js"
+        integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script>
 <style>
   :root {
     --bg: #f7f7f5; --surface: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
@@ -62,6 +73,25 @@
   .tag.highly_cited { background: var(--tag-cited); }
   .tag.cited_by_top { background: var(--tag-cocited); }
   .error { color: var(--danger); }
+  /* Rendered Markdown (agent answers) */
+  .md { font-size: 15.5px; overflow-wrap: anywhere; }
+  .md > :first-child { margin-top: 0; }
+  .md h1, .md h2, .md h3, .md h4 { color: var(--text); text-transform: none; letter-spacing: 0;
+                                   line-height: 1.3; margin: 20px 0 8px; }
+  .md h1 { font-size: 21px; } .md h2 { font-size: 18px; } .md h3 { font-size: 16px; } .md h4 { font-size: 15px; }
+  .md p { margin: 8px 0; }
+  .md ul, .md ol { margin: 8px 0; padding-left: 22px; }
+  .md table { display: block; overflow-x: auto; margin: 12px 0; }
+  .md code { background: var(--log-bg); padding: 1px 5px; border-radius: 4px;
+             font: 13px ui-monospace, Consolas, monospace; }
+  .md pre { background: var(--log-bg); padding: 12px; border-radius: 8px; overflow-x: auto; }
+  .md pre code { padding: 0; background: none; }
+  .md hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+  .md blockquote { margin: 8px 0; padding-left: 12px; border-left: 3px solid var(--border); color: var(--muted); }
+  .md .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+  .cite { font-size: 12px; white-space: nowrap; }
+  .cite.unverified { color: var(--danger); }
+  .warn { color: var(--danger); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -98,7 +128,8 @@
 const $ = (id) => document.getElementById(id);
 let source = null;
 
-// Build elements with textContent (never innerHTML for data from APIs/LLMs).
+// Build elements with textContent. LLM/API text is never inserted as HTML,
+// except the agent's Markdown, and only after DOMPurify has sanitized it.
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -144,8 +175,54 @@ function renderSearch(r) {
   box.hidden = false;
 }
 
+// --- Markdown + math, rendered safely -------------------------------------------
+// 1) math is cut out first (Markdown would eat the backslashes in \( \) and \[ \])
+// 2) [W123] citations become links (verified) or red "unverified" marks
+// 3) marked turns Markdown into HTML, KaTeX renders the math back in
+// 4) DOMPurify removes scripts, event handlers, javascript: links, ...
+// If a library failed to load, the answer is shown as plain text (still readable).
+function renderMarkdown(md, verifiedIds) {
+  if (!window.marked || !window.DOMPurify) return el("p", { class: "answer" }, md);
+  const math = [];
+  const stash = (tex, display) => { math.push({ tex, display }); return `KATEXMATH${math.length - 1}END`; };
+  let src = md
+    .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => stash(t, true))
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => stash(t, true))
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => stash(t, false))
+    .replace(/\[(W\d{4,})\]/g, (_, id) => verifiedIds.has(id)
+      ? `<a class="cite" href="https://openalex.org/${id}">[${id}]</a>`
+      : `<span class="cite unverified" title="No tool returned this ID">[${id} unverified]</span>`);
+  let html = marked.parse(src, { gfm: true });
+  html = html.replace(/KATEXMATH(\d+)END/g, (_, i) => {
+    const { tex, display } = math[Number(i)];
+    if (!window.katex) return el("code", {}, tex).outerHTML;  // escaped text
+    return katex.renderToString(tex, { displayMode: display, throwOnError: false, trust: false });
+  });
+  const box = el("div", { class: "md" });
+  box.innerHTML = DOMPurify.sanitize(html);
+  for (const a of box.querySelectorAll("a[href]")) { a.target = "_blank"; a.rel = "noopener noreferrer"; }
+  return box;
+}
+
 function renderAgent(r) {
-  $("result").replaceChildren(el("div", { class: "card" }, el("p", { class: "answer" }, r.answer)));
+  const verified = new Set((r.sources || []).map((p) => (p.openalex_id || "").split("/").pop()));
+  const sources = (r.sources || []).map((p) => {
+    const href = p.doi || p.openalex_id;
+    return el("li", {},
+      el("a", { href, target: "_blank", rel: "noopener" }, p.title || "(untitled)"),
+      el("span", { class: "meta" },
+        ` · ${p.year ?? "?"} · cited by ${(p.cited_by_count ?? 0).toLocaleString()} · ${href.split("/").pop()}`));
+  });
+  const notes = [];
+  if (!sources.length) notes.push(el("p", { class: "meta" },
+    "The answer cites no papers from the tools: treat it as general background, not as sourced claims."));
+  if (r.unverified_ids?.length) notes.push(el("p", { class: "warn" },
+    `Unverified: ${r.unverified_ids.join(", ")}. No tool returned these IDs, so the papers may be wrong or invented.`));
+  $("result").replaceChildren(
+    el("div", { class: "card" }, renderMarkdown(r.answer, verified)),
+    el("div", { class: "card" },
+      el("h2", {}, `Sources (${sources.length}) · checked against tool results`),
+      sources.length ? el("ul", {}, ...sources) : el("span"), ...notes));
   $("result").hidden = false;
 }
 

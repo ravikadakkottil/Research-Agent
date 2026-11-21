@@ -20,3 +20,4 @@ build/
 
 HANDOFF.md
 Project-Plan.xlsx
+.env.example

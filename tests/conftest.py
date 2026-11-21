@@ -15,3 +15,5 @@ os.environ["CACHE_ENABLED"] = "false"
 os.environ["EMBEDDING_CACHE_ENABLED"] = "false"
 # No real Gemini calls: rerank tests inject a fake embedder.
 os.environ["GEMINI_API_KEY"] = ""
+# No real Europe PMC calls: tests use a fake transport.
+os.environ["EUROPEPMC_ENABLED"] = "false"

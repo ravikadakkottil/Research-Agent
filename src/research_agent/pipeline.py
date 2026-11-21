@@ -5,6 +5,7 @@ The fixed research pipeline (Python decides the steps):
       -> LLM #1 query plan                         ┐
       -> recent window (user > field pace > default) │ retrieve_reading_list()
       -> OpenAlex multi-bucket retrieval (parallel)  │  = the RETRIEVAL stage
+         + Europe PMC if biomedical (fail-soft)      │
       -> dedupe                                      │
       -> semantic scoring (Gemini embeddings)        │
       -> citation expansion (co-cited landmarks)     │
@@ -23,9 +24,11 @@ No print() or input() here. Progress is reported through `on_step`.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from datetime import date
 
 from research_agent.cache import ResponseCache
@@ -38,7 +41,9 @@ from research_agent.retrieval.buckets import retrieve_buckets
 from research_agent.retrieval.expansion import expand_by_citations, is_weak_expansion
 from research_agent.retrieval.recency import resolve_recent_window
 from research_agent.retrieval.rerank import filter_by_similarity, score_papers
+from research_agent.retrieval.second_source import fetch_europepmc
 from research_agent.retrieval.selection import deduplicate_papers, select_balanced_papers
+from research_agent.sources.europepmc import EuropePMCClient, create_europepmc_client
 from research_agent.sources.openalex import OpenAlexClient, create_openalex_client
 from research_agent.synthesis import summarize_papers
 
@@ -62,8 +67,8 @@ async def retrieve_reading_list(
     """Retrieval stage only: plan, recent window, buckets, dedupe, rerank, selection."""
     settings = settings or get_settings()
     async with AsyncExitStack() as stack:
-        client, llm_cache, embedder = await _open_resources(stack, settings, client)
-        return await _retrieve(user_question, settings, client, llm_cache, embedder, on_step)
+        res = await _open_resources(stack, settings, client)
+        return await _retrieve(user_question, settings, res, on_step)
 
 
 async def run_paper_search(
@@ -78,8 +83,9 @@ async def run_paper_search(
     started = time.perf_counter()
 
     async with AsyncExitStack() as stack:
-        client, llm_cache, embedder = await _open_resources(stack, settings, client)
-        reading = await _retrieve(user_question, settings, client, llm_cache, embedder, on_step)
+        res = await _open_resources(stack, settings, client)
+        llm_cache = res.llm_cache
+        reading = await _retrieve(user_question, settings, res, on_step)
 
         on_step("\n7) Asking LLM to synthesize the research...")
         summary = await summarize_papers(
@@ -106,9 +112,17 @@ async def run_paper_search(
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
+@dataclass
+class _Resources:
+    client: OpenAlexClient
+    llm_cache: ResponseCache | None
+    embedder: Embedder | None
+    europepmc: EuropePMCClient | None
+
+
 async def _open_resources(
     stack: AsyncExitStack, settings: Settings, client: OpenAlexClient | None
-) -> tuple[OpenAlexClient, ResponseCache | None, Embedder | None]:
+) -> _Resources:
     """
     Create what this run needs and register cleanup on the stack.
 
@@ -123,17 +137,19 @@ async def _open_resources(
     embedder = create_embedder(settings)
     if embedder:
         await stack.enter_async_context(embedder)
-    return client, llm_cache, embedder
+    europepmc = create_europepmc_client(settings)
+    if europepmc:
+        await stack.enter_async_context(europepmc)
+    return _Resources(client, llm_cache, embedder, europepmc)
 
 
 async def _retrieve(
     user_question: str,
     settings: Settings,
-    client: OpenAlexClient,
-    llm_cache: ResponseCache | None,
-    embedder: Embedder | None,
+    res: _Resources,
     on_step: StepCallback,
 ) -> ReadingList:
+    client, llm_cache, embedder = res.client, res.llm_cache, res.embedder
     current_year = date.today().year
 
     on_step("1) Asking LLM for a search plan...")
@@ -155,12 +171,25 @@ async def _retrieve(
     on_step(f"   recent = {window.from_year}-present  [{window.source}] {window.explanation}")
 
     on_step("\n2) Searching OpenAlex (relevant / recent / highly cited, in parallel)...")
+    if plan.biomedical and res.europepmc:
+        on_step("   + Europe PMC (biomedical topic)")
     t0 = time.perf_counter()
     before = _counters(client)  # the client may be shared (web app): report THIS run only
-    buckets = await retrieve_buckets(client, plan, window, settings)
+    buckets, (epmc_papers, epmc_status) = await asyncio.gather(
+        retrieve_buckets(client, plan, window, settings),
+        fetch_europepmc(res.europepmc, client, plan, settings),
+    )
+    if epmc_papers:
+        # Ranked by citations in Europe PMC -> they join the highly_cited perspective.
+        buckets["highly_cited"] = sorted(
+            [*buckets["highly_cited"], *epmc_papers],
+            key=lambda p: p.cited_by_count,
+            reverse=True,
+        )
     bucket_counts = {name: len(papers) for name, papers in buckets.items()}
     for name, count in bucket_counts.items():
         on_step(f"   {name:<13} = {count}")
+    on_step(f"   europe pmc    = {epmc_status}")
     on_step(f"   took {time.perf_counter() - t0:.1f}s  ({_http_stats(client, before)})")
 
     on_step("\n3) Deduplicating...")
@@ -255,6 +284,7 @@ async def _retrieve(
         candidates=candidates,
         shortlist=shortlist,
         papers=selected,
+        europepmc_status=epmc_status,
     )
 
 

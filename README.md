@@ -27,13 +27,20 @@ database and Gemini embeddings. Retrieval quality is measured with an evaluation
 - **Citation expansion:** landmark papers that don't use the topic's keywords are found
   through the reference lists of the best results. *The spread of true and false news
   online* never says "misinformation", but the field's top papers all cite it.
+- **Second source for biomedical topics:** Europe PMC (PubMed abstracts + full text) runs
+  alongside OpenAlex and fills in abstracts OpenAlex lacks, so landmarks whose titles don't
+  name the topic are still found. It is optional and fail-soft: a slow or failed response
+  never blocks a question.
 - **Semantic rerank:** candidates are scored by meaning against the question with
   `gemini-embedding-001`, so keyword collisions ("diffusion **models**" vs "diffusion of
   innovations") are filtered out.
 - **Grounded synthesis:** the summary is validated JSON, and it may cite only papers that
   were actually retrieved.
 - **Tool-calling agent mode:** the LLM chooses its own tools (search, paper lookup,
-  citations, references) for open-ended questions.
+  citations, references) for open-ended questions. Every paper it cites is checked against
+  what the tools actually returned. The answer comes with a verified Sources list, and
+  unknown IDs are flagged. Answers render as Markdown with math (KaTeX), sanitized
+  before display.
 - **Web app + API:** live progress streamed over Server-Sent Events, plus interactive
   OpenAPI docs.
 - **Resilient and efficient:** async I/O, bounded concurrency, retries with backoff that
@@ -52,10 +59,14 @@ Retrieval quality on the golden set (13 topics × 3 runs, judged by `gpt-oss-120
 | + short core query and alternative phrasings | 0.53 | 0.65 | 0.41 |
 | + semantic rerank | 0.58 | 0.79 | 0.62 |
 | + citation expansion | 0.71 | 0.76 | 0.58 |
-| **+ similarity-ordered citation picks (current)** | **0.78** | **0.80** | **0.58** |
+| + similarity-ordered citation picks | 0.78 | 0.80 | 0.58 |
+| **+ Europe PMC for biomedical topics (current)** | **0.74** | **0.81** | **0.60** |
 
-For the current version, run-to-run spread on these metrics is ≤ 0.04. Citation expansion
-raised the share of must-include papers that are retrieved at all from 0.65 to 0.90+.
+Citation expansion and Europe PMC raised the share of must-include papers that are retrieved
+at all from 0.65 to 0.95. The latest recall dip is on non-biomedical topics, where Europe PMC
+isn't used. It comes from a planning-prompt change that made the LLM pad its alternative
+queries ("fake news diffusion" instead of "fake news"). The fix is identified but not yet
+applied.
 
 ## How it works
 
@@ -67,6 +78,7 @@ question
         relevant      full-text search, ranked by relevance
         recent        title+abstract, inside the window, ranked by citations
         highly cited  title+abstract, core query + alternatives, ranked by citations
+        + Europe PMC  biomedical topics only, ranked by citations, mapped onto OpenAlex by DOI
   → dedupe (DOI / OpenAlex ID / title)
   → semantic scoring (Gemini embeddings, cosine similarity to the question)
   → citation expansion: papers cited by ≥ 3 of the top 15 candidates
@@ -105,7 +117,7 @@ python main.py
 | Endpoint | Description |
 |---|---|
 | `POST /api/search` | Reading list + summary (JSON) |
-| `POST /api/agent` | Tool-calling agent answer (JSON) |
+| `POST /api/agent` | Tool-calling agent answer (Markdown) + verified `sources` + `unverified_ids` |
 | `GET /api/search/stream?question=…` | Same as `/api/search`, streamed as SSE events (`step`, `result`, `failure`) |
 | `GET /api/agent/stream?question=…` | Agent, streamed |
 | `GET /health` | Health check |
@@ -139,6 +151,8 @@ All settings live in `src/research_agent/config.py` and can be overridden in `.e
 | `CITATION_EXPANSION_ENABLED` | `true` | citation expansion on/off |
 | `EXPANSION_MIN_CITERS` | `3` | top papers that must cite a paper before it's added |
 | `EXPANSION_MIN_SIMILARITY` | `0.68` | stricter similarity bar for papers found only through citations |
+| `EUROPEPMC_ENABLED` | `true` | Europe PMC search for biomedical questions |
+| `EUROPEPMC_TIMEOUT_SECONDS` | `20` | time limit for that step (then OpenAlex only) |
 | `CACHE_TTL_HOURS` | `24` | API / LLM response cache lifetime |
 | `HTTP_MAX_CONCURRENCY` | `5` | parallel OpenAlex requests |
 
@@ -171,10 +185,11 @@ ruff check . && ruff format .
 ```
 src/research_agent/
   config.py  models.py  prompts.py      settings, data models, prompts
-  sources/openalex.py                   async OpenAlex client (retries, cache, rate limits)
+  sources/                              async OpenAlex + Europe PMC clients (retries, cache)
   llm.py  embeddings.py                 Groq JSON calls, Gemini embeddings
   planning.py  synthesis.py             LLM steps
-  retrieval/                            recent window, buckets, rerank, selection
+  retrieval/                            recent window, buckets, second source, rerank,
+                                        citation expansion, selection
   pipeline.py                           orchestration
   agent/                                tool-calling agent
   api/                                  FastAPI app + web UI
@@ -186,11 +201,12 @@ tests/
 ## Roadmap
 
 - [x] Citation-graph expansion (pull in landmark papers that top results cite)
-- [ ] Semantic Scholar as a second source
+- [x] Second source for biomedical topics (Europe PMC)
 - [ ] LangGraph orchestration + Langfuse tracing
 - [ ] Deep-research mode (planner + parallel sub-researchers)
 - [ ] Full-text RAG over open-access PDFs
 
 ## Acknowledgements
 
-Paper metadata from [OpenAlex](https://openalex.org) (CC0).
+Paper metadata from [OpenAlex](https://openalex.org) (CC0) and
+[Europe PMC](https://europepmc.org).
