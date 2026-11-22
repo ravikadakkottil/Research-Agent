@@ -66,14 +66,19 @@ Retrieval quality on the golden set (13 topics × 3 runs, judged by `gpt-oss-120
 | + citation expansion | 0.71 | 0.76 | 0.58 |
 | + similarity-ordered citation picks | 0.78 | 0.80 | 0.58 |
 | + Europe PMC for biomedical topics | 0.74 | 0.81 | 0.60 |
-| **LangGraph orchestration, same retrieval (current)** | **0.79** | **0.78** | **0.55** |
+| LangGraph orchestration, same retrieval | 0.79 | 0.78 | 0.55 |
+| **+ recent picks ranked by similarity (current)** | **0.74** | **0.83** | **0.72** |
 
 Citation expansion and Europe PMC raised the share of must-include papers that are retrieved
-at all from 0.65 to 0.93–0.99. Repeated evals of unchanged code differ by up to ±0.04
-(planning is an uncached LLM call), so the last two rows reflect the same retrieval
-quality. The LangGraph port was accepted on that basis. The weakest metric is recent-paper
-precision: when the planner picks a generic core query, the recent bucket fills with
-popular but general papers.
+at all from 0.65 to 0.93–1.00. Repeated evals of unchanged code differ by up to ±0.04
+(planning is an uncached LLM call), so the Europe PMC and LangGraph rows reflect the same
+retrieval quality.
+
+Recent picks used to be the newest papers in the window. With a generic core query, those
+were popular but general papers. Ranking them by similarity to the question raised
+recent-paper precision from 0.55 to 0.72 and overall precision from 0.78 to 0.83. The latest
+row is based on 28 of 39 runs, because the LLM provider's daily token limit cut off the
+rest. Its recall change (−0.04 on the same runs) is within noise.
 
 ## How it works
 
@@ -90,7 +95,7 @@ question
   → semantic scoring (Gemini embeddings, cosine similarity to the question)
   → citation expansion: papers cited by ≥ 3 of the top 15 candidates
   → similarity threshold (drops off-topic papers; stricter for citation-only papers)
-  → balanced selection (quotas per perspective)
+  → balanced selection (quotas per perspective; recent and co-cited picks ranked by similarity)
   → LLM: grounded synthesis (validated JSON)
 ```
 
