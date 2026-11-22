@@ -6,6 +6,7 @@ fastapi==0.163.2
 google-genai==3.6.1
 groq==1.7.0
 httpx==0.28.1
+langfuse==5.2.0   # tracing; brings opentelemetry-sdk (used directly in tracing.py + tests)
 pydantic==2.14.3
 pydantic-settings==2.16.3
 python-dotenv==1.2.4

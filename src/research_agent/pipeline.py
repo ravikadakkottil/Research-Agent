@@ -46,6 +46,13 @@ from research_agent.retrieval.selection import deduplicate_papers, select_balanc
 from research_agent.sources.europepmc import EuropePMCClient, create_europepmc_client
 from research_agent.sources.openalex import OpenAlexClient, create_openalex_client
 from research_agent.synthesis import summarize_papers
+from research_agent.tracing import (
+    current_trace_url,
+    observe,
+    paper_brief,
+    papers_brief,
+    trace,
+)
 
 StepCallback = Callable[[str], None]
 
@@ -66,9 +73,12 @@ async def retrieve_reading_list(
 ) -> ReadingList:
     """Retrieval stage only: plan, recent window, buckets, dedupe, rerank, selection."""
     settings = settings or get_settings()
-    async with AsyncExitStack() as stack:
-        res = await _open_resources(stack, settings, client)
-        return await _retrieve(user_question, settings, res, on_step)
+    with trace("retrieval", input={"question": user_question}) as root:
+        async with AsyncExitStack() as stack:
+            res = await _open_resources(stack, settings, client)
+            reading = await _retrieve(user_question, settings, res, on_step)
+        root.update(output={"papers": papers_brief(reading.papers)})
+        return reading
 
 
 async def run_paper_search(
@@ -82,21 +92,27 @@ async def run_paper_search(
     settings = settings or get_settings()
     started = time.perf_counter()
 
-    async with AsyncExitStack() as stack:
-        res = await _open_resources(stack, settings, client)
-        llm_cache = res.llm_cache
-        reading = await _retrieve(user_question, settings, res, on_step)
+    # One trace per question; every step below nests inside it (see tracing.py).
+    with trace("search", input={"question": user_question}) as root:
+        async with AsyncExitStack() as stack:
+            res = await _open_resources(stack, settings, client)
+            llm_cache = res.llm_cache
+            reading = await _retrieve(user_question, settings, res, on_step)
 
-        on_step("\n7) Asking LLM to synthesize the research...")
-        summary = await summarize_papers(
-            user_question,
-            reading.papers,
-            recent_window=reading.recent_window,
-            abstract_chars=settings.abstract_chars_for_llm,
-            cache=llm_cache,
-        )
-        llm_stats = f"hits={llm_cache.hits} misses={llm_cache.misses}" if llm_cache else "off"
-        on_step(f"\nDone in {time.perf_counter() - started:.1f}s  (LLM cache {llm_stats})")
+            on_step("\n7) Asking LLM to synthesize the research...")
+            summary = await summarize_papers(
+                user_question,
+                reading.papers,
+                recent_window=reading.recent_window,
+                abstract_chars=settings.abstract_chars_for_llm,
+                cache=llm_cache,
+            )
+            llm_stats = f"hits={llm_cache.hits} misses={llm_cache.misses}" if llm_cache else "off"
+            on_step(f"\nDone in {time.perf_counter() - started:.1f}s  (LLM cache {llm_stats})")
+
+        root.update(output={"answer": summary.answer, "papers": papers_brief(reading.papers)})
+        if url := await current_trace_url():
+            on_step(f"Trace: {url}")
 
     return SearchResult(
         user_question=user_question,
@@ -153,21 +169,22 @@ async def _retrieve(
     current_year = date.today().year
 
     on_step("1) Asking LLM for a search plan...")
-    plan = await generate_query_plan(user_question, current_year=current_year, cache=llm_cache)
+    with observe("plan", input={"question": user_question}) as obs:
+        plan = await generate_query_plan(user_question, current_year=current_year, cache=llm_cache)
+        window = resolve_recent_window(
+            plan,
+            user_question,
+            current_year=current_year,
+            default_years=settings.default_recent_years,
+            min_years=settings.min_recent_years,
+            max_years=settings.max_recent_years,
+        )
+        obs.update(output={"plan": plan.model_dump(), "recent_window": window.model_dump()})
     on_step(f"   relevance query = {plan.search_query}")
     on_step(f"   core query      = {plan.strict_query}")
     if plan.alternatives:
         on_step(f"   alternatives    = {' / '.join(plan.alternatives)}")
     on_step(f"   reason = {plan.reason}")
-
-    window = resolve_recent_window(
-        plan,
-        user_question,
-        current_year=current_year,
-        default_years=settings.default_recent_years,
-        min_years=settings.min_recent_years,
-        max_years=settings.max_recent_years,
-    )
     on_step(f"   recent = {window.from_year}-present  [{window.source}] {window.explanation}")
 
     on_step("\n2) Searching OpenAlex (relevant / recent / highly cited, in parallel)...")
@@ -175,25 +192,42 @@ async def _retrieve(
         on_step("   + Europe PMC (biomedical topic)")
     t0 = time.perf_counter()
     before = _counters(client)  # the client may be shared (web app): report THIS run only
-    buckets, (epmc_papers, epmc_status) = await asyncio.gather(
-        retrieve_buckets(client, plan, window, settings),
-        fetch_europepmc(res.europepmc, client, plan, settings),
-    )
-    if epmc_papers:
-        # Ranked by citations in Europe PMC -> they join the highly_cited perspective.
-        buckets["highly_cited"] = sorted(
-            [*buckets["highly_cited"], *epmc_papers],
-            key=lambda p: p.cited_by_count,
-            reverse=True,
+
+    async def europepmc_step() -> tuple[list[Paper], str]:
+        with observe("europe pmc", input={"biomedical": plan.biomedical}) as obs:
+            papers, status = await fetch_europepmc(res.europepmc, client, plan, settings)
+            obs.update(output={"status": status, "papers": papers_brief(papers, 10)})
+            return papers, status
+
+    # "retriever" type: Langfuse shows it as a retrieval step; the OpenAlex
+    # requests made by both parallel tasks nest inside it.
+    with observe("retrieve", as_type="retriever") as obs:
+        buckets, (epmc_papers, epmc_status) = await asyncio.gather(
+            retrieve_buckets(client, plan, window, settings),
+            europepmc_step(),
         )
-    bucket_counts = {name: len(papers) for name, papers in buckets.items()}
+        if epmc_papers:
+            # Ranked by citations in Europe PMC -> they join the highly_cited perspective.
+            buckets["highly_cited"] = sorted(
+                [*buckets["highly_cited"], *epmc_papers],
+                key=lambda p: p.cited_by_count,
+                reverse=True,
+            )
+        bucket_counts = {name: len(papers) for name, papers in buckets.items()}
+        http = _http_stats(client, before)
+        obs.update(
+            output={name: papers_brief(papers, 10) for name, papers in buckets.items()},
+            metadata={"counts": bucket_counts, "europepmc": epmc_status, "http": http},
+        )
     for name, count in bucket_counts.items():
         on_step(f"   {name:<13} = {count}")
     on_step(f"   europe pmc    = {epmc_status}")
-    on_step(f"   took {time.perf_counter() - t0:.1f}s  ({_http_stats(client, before)})")
+    on_step(f"   took {time.perf_counter() - t0:.1f}s  ({http})")
 
     on_step("\n3) Deduplicating...")
-    candidates = deduplicate_papers(buckets)
+    with observe("dedupe", input={"papers": sum(bucket_counts.values())}) as obs:
+        candidates = deduplicate_papers(buckets)
+        obs.update(output={"unique": len(candidates)})
     on_step(f"   unique candidates = {len(candidates)}")
 
     async def score(papers: list[Paper]) -> list[Paper]:
@@ -209,24 +243,44 @@ async def _retrieve(
     else:
         on_step("\n4) Semantic scoring (Gemini embeddings)...")
         t0 = time.perf_counter()
-        candidates = await score(candidates)
+        with observe("semantic scoring", input={"papers": len(candidates)}) as obs:
+            candidates = await score(candidates)
+            by_sim = sorted(candidates, key=lambda p: p.similarity or 0.0, reverse=True)
+            obs.update(
+                output={"top": papers_brief(by_sim[:5]), "bottom": papers_brief(by_sim[-3:])}
+            )
         on_step(f"   scored {len(candidates)} papers  (took {time.perf_counter() - t0:.1f}s)")
 
     if settings.citation_expansion_enabled:
         on_step("\n5) Citation expansion (what do the top papers cite?)...")
         t0 = time.perf_counter()
-        candidates, new_papers = await expand_by_citations(
-            client,
-            candidates,
-            seed_count=settings.expansion_seed_count,
-            min_citers=settings.expansion_min_citers,
-            max_papers=settings.expansion_max_papers,
-        )
-        new_papers = await score(new_papers)
-        candidates = candidates + new_papers
-        bucket_counts["cited_by_top"] = sum(
-            1 for p in candidates if "cited_by_top" in p.retrieval_reasons
-        )
+        with observe(
+            "citation expansion",
+            input={
+                "seeds": settings.expansion_seed_count,
+                "min_citers": settings.expansion_min_citers,
+            },
+        ) as obs:
+            candidates, new_papers = await expand_by_citations(
+                client,
+                candidates,
+                seed_count=settings.expansion_seed_count,
+                min_citers=settings.expansion_min_citers,
+                max_papers=settings.expansion_max_papers,
+            )
+            new_papers = await score(new_papers)
+            candidates = candidates + new_papers
+            bucket_counts["cited_by_top"] = sum(
+                1 for p in candidates if "cited_by_top" in p.retrieval_reasons
+            )
+            obs.update(
+                output={
+                    "co_cited": bucket_counts["cited_by_top"],
+                    "newly_fetched": [
+                        f"cited by {p.cocited_by} | {paper_brief(p)}" for p in new_papers
+                    ],
+                }
+            )
         on_step(
             f"   {bucket_counts['cited_by_top']} co-cited papers, {len(new_papers)} newly fetched"
             f"  (took {time.perf_counter() - t0:.1f}s)"
@@ -236,18 +290,37 @@ async def _retrieve(
 
     shortlist = None
     if embedder is not None:
-        shortlist = filter_by_similarity(
-            candidates,
-            min_similarity=settings.rerank_min_similarity,
-            min_keep=settings.target_final_papers,
-        )
-        # Citation-only papers need a stricter bar (see config: expansion_min_similarity),
-        # unless removing them would leave fewer papers than the reading list needs.
-        weak = {id(p) for p in shortlist if is_weak_expansion(p, settings.expansion_min_similarity)}
-        if weak and len(shortlist) - len(weak) >= settings.target_final_papers:
-            shortlist = [p for p in shortlist if id(p) not in weak]
-        else:
-            weak = set()
+        with observe(
+            "similarity filter",
+            input={
+                "candidates": len(candidates),
+                "min_similarity": settings.rerank_min_similarity,
+                "citation_only_min": settings.expansion_min_similarity,
+            },
+        ) as obs:
+            shortlist = filter_by_similarity(
+                candidates,
+                min_similarity=settings.rerank_min_similarity,
+                min_keep=settings.target_final_papers,
+            )
+            # Citation-only papers need a stricter bar (see config: expansion_min_similarity),
+            # unless removing them would leave fewer papers than the reading list needs.
+            weak = {
+                id(p) for p in shortlist if is_weak_expansion(p, settings.expansion_min_similarity)
+            }
+            if weak and len(shortlist) - len(weak) >= settings.target_final_papers:
+                removed = [p for p in shortlist if id(p) in weak]
+                shortlist = [p for p in shortlist if id(p) not in weak]
+            else:
+                weak, removed = set(), []
+            kept = {id(p) for p in shortlist}
+            obs.update(
+                output={
+                    "kept": len(shortlist),
+                    "dropped": papers_brief([p for p in candidates if id(p) not in kept]),
+                    "citation_only_removed": papers_brief(removed),
+                }
+            )
         on_step(
             f"\n   rerank: kept {len(shortlist)}/{len(candidates)} with similarity >= "
             f"{settings.rerank_min_similarity}"
@@ -262,16 +335,20 @@ async def _retrieve(
             on_step(f"   lowest: {p.similarity:.2f} | {p.title or '(untitled)'}")
 
     on_step("\n6) Selecting a balanced reading list...")
-    selected = select_balanced_papers(
-        shortlist if shortlist is not None else candidates,
-        target_count=settings.target_final_papers,
-        quotas={
-            "relevant": settings.select_relevant,
-            "recent": settings.select_recent,
-            "highly_cited": settings.select_highly_cited,
-            "cited_by_top": settings.select_cited_by_top,
-        },
-    )
+    quotas = {
+        "relevant": settings.select_relevant,
+        "recent": settings.select_recent,
+        "highly_cited": settings.select_highly_cited,
+        "cited_by_top": settings.select_cited_by_top,
+    }
+    pool = shortlist if shortlist is not None else candidates
+    with observe("select", input={"pool": len(pool), "quotas": quotas}) as obs:
+        selected = select_balanced_papers(
+            pool, target_count=settings.target_final_papers, quotas=quotas
+        )
+        obs.update(
+            output=[f"{paper_brief(p)} | {', '.join(p.retrieval_reasons)}" for p in selected]
+        )
     for i, p in enumerate(selected, start=1):
         reasons = ", ".join(p.retrieval_reasons)
         sim = f"{p.similarity:.2f} | " if p.similarity is not None else ""

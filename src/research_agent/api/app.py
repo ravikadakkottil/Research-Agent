@@ -47,6 +47,7 @@ from research_agent.sources.openalex import (
     OpenAlexRateLimitError,
     create_openalex_client,
 )
+from research_agent.tracing import flush_tracing
 
 logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
@@ -66,6 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = settings
         app.state.openalex = client
         yield
+    flush_tracing()  # send the last buffered spans on shutdown
 
 
 app = FastAPI(

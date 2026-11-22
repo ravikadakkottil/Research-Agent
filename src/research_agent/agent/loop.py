@@ -17,10 +17,11 @@ from typing import Any
 from research_agent.agent.grounding import check_citations
 from research_agent.agent.tools import TOOL_SCHEMAS, AgentTools
 from research_agent.config import Settings, get_settings
-from research_agent.llm import get_client
+from research_agent.llm import get_client, usage_details
 from research_agent.models import AgentResult
 from research_agent.prompts import AGENT_PROMPT
 from research_agent.sources.openalex import create_openalex_client
+from research_agent.tracing import current_trace_url, observe, score_trace, trace
 
 PREVIEW_CHARS = 400
 
@@ -56,6 +57,28 @@ async def run_tool_agent(
     settings: Settings | None = None,
 ) -> AgentResult:
     settings = settings or get_settings()
+    # One "agent" trace per question: each LLM turn is a generation, each tool call
+    # a "tool" observation, so the trace reads like the agent's reasoning log.
+    with trace("agent", as_type="agent", input={"question": user_question}) as root:
+        result = await _agent_loop(user_question, settings, on_step)
+        root.update(
+            output={
+                "answer": result.answer,
+                "sources": [p.title for p in result.sources],
+                "unverified_ids": result.unverified_ids,
+            }
+        )
+        # Scores make bad runs searchable in Langfuse (filter: unverified_citations > 0).
+        score_trace("verified_citations", len(result.sources))
+        score_trace("unverified_citations", len(result.unverified_ids))
+        if url := await current_trace_url():
+            on_step(f"Trace: {url}")
+        return result
+
+
+async def _agent_loop(
+    user_question: str, settings: Settings, on_step: Callable[[str], None]
+) -> AgentResult:
     llm = get_client()
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": AGENT_PROMPT},
@@ -67,14 +90,25 @@ async def run_tool_agent(
 
         for step in range(1, settings.max_agent_steps + 1):
             on_step(f"\n--- Agent step {step}/{settings.max_agent_steps} ---")
-            completion = await llm.chat.completions.create(
+            with observe(
+                f"agent step {step}",
+                as_type="generation",
                 model=settings.llm_model,
-                messages=messages,
-                tools=TOOL_SCHEMAS,  # what the model may call
-                tool_choice="auto",  # model may call a tool OR answer directly
-                temperature=settings.llm_temperature,
-            )
-            message = completion.choices[0].message
+                model_parameters={"temperature": settings.llm_temperature},
+                input=list(messages),  # a copy: `messages` keeps growing after this step
+            ) as gen:
+                completion = await llm.chat.completions.create(
+                    model=settings.llm_model,
+                    messages=messages,
+                    tools=TOOL_SCHEMAS,  # what the model may call
+                    tool_choice="auto",  # model may call a tool OR answer directly
+                    temperature=settings.llm_temperature,
+                )
+                message = completion.choices[0].message
+                gen.update(
+                    output=_assistant_message_to_dict(message),
+                    usage_details=usage_details(completion),
+                )
 
             if not message.tool_calls:
                 on_step("No tool call -> final answer.")
@@ -87,9 +121,7 @@ async def run_tool_agent(
             messages.append(_assistant_message_to_dict(message))
 
             # If the model asks for several tools at once, run them in parallel.
-            results = await asyncio.gather(
-                *(tools.execute(tc.function.name, tc.function.arguments) for tc in calls)
-            )
+            results = await asyncio.gather(*(_traced_tool(tools, tc) for tc in calls))
 
             for tc, result in zip(calls, results, strict=True):
                 preview = result if len(result) < PREVIEW_CHARS else result[:PREVIEW_CHARS] + "..."
@@ -111,9 +143,21 @@ async def run_tool_agent(
     )
 
 
+async def _traced_tool(tools: AgentTools, tc: Any) -> str:
+    with observe(f"tool: {tc.function.name}", as_type="tool", input=tc.function.arguments) as obs:
+        result = await tools.execute(tc.function.name, tc.function.arguments)
+        obs.update(output=result)
+        return result
+
+
 def _grounded(answer: str, tools: AgentTools, on_step: Callable[[str], None]) -> AgentResult:
     """Check the answer's [W...] citations against what the tools actually returned."""
-    sources, unverified = check_citations(answer, tools.seen)
+    with observe("grounding check", input={"papers_seen": len(tools.seen)}) as obs:
+        sources, unverified = check_citations(answer, tools.seen)
+        obs.update(
+            output={"verified": [p.title for p in sources], "unverified": unverified},
+            level="WARNING" if unverified else "DEFAULT",
+        )
     on_step(
         f"Grounding check: {len(sources)} cited paper(s) verified, "
         f"{len(unverified)} unverified{' ' + ', '.join(unverified) if unverified else ''}"

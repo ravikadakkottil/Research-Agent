@@ -41,6 +41,11 @@ database and Gemini embeddings. Retrieval quality is measured with an evaluation
   what the tools actually returned. The answer comes with a verified Sources list, and
   unknown IDs are flagged. Answers render as Markdown with math (KaTeX), sanitized
   before display.
+- **Tracing (optional):** with [Langfuse](https://langfuse.com) keys set, every question
+  becomes a trace: each step's inputs and outputs, LLM prompts, replies and token counts,
+  embedding calls, and every OpenAlex query (with cache hits). Eval runs attach their scores
+  (recall, precision, …) to their traces and share a session, so weak runs can be filtered and
+  opened step by step. API keys never appear in traces.
 - **Web app + API:** live progress streamed over Server-Sent Events, plus interactive
   OpenAPI docs.
 - **Resilient and efficient:** async I/O, bounded concurrency, retries with backoff that
@@ -92,7 +97,8 @@ question
 Requires Python 3.11+ and three free API keys:
 [Groq](https://console.groq.com), [OpenAlex](https://openalex.org/settings/api) and
 [Gemini](https://aistudio.google.com/apikey). Gemini is optional: without it the rerank
-step is skipped.
+step is skipped. [Langfuse](https://cloud.langfuse.com) keys are optional too: without them
+tracing is off.
 
 ```bash
 python -m venv .venv
@@ -153,6 +159,9 @@ All settings live in `src/research_agent/config.py` and can be overridden in `.e
 | `EXPANSION_MIN_SIMILARITY` | `0.68` | stricter similarity bar for papers found only through citations |
 | `EUROPEPMC_ENABLED` | `true` | Europe PMC search for biomedical questions |
 | `EUROPEPMC_TIMEOUT_SECONDS` | `20` | time limit for that step (then OpenAlex only) |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | none | Langfuse project keys; tracing is on when both are set |
+| `LANGFUSE_BASE_URL` | `https://cloud.langfuse.com` | Langfuse region (US: `https://us.cloud.langfuse.com`) or a self-hosted URL |
+| `TRACING_ENABLED` | `true` | turn tracing off without removing the keys |
 | `CACHE_TTL_HOURS` | `24` | API / LLM response cache lifetime |
 | `HTTP_MAX_CONCURRENCY` | `5` | parallel OpenAlex requests |
 
@@ -173,7 +182,8 @@ python evals/compare.py evals/results/A.json evals/results/B.json
 | `grounding` | summary citations that exist in the reading list (`--mode full`) |
 
 Each run is repeated to measure natural LLM variance. `compare.py` marks differences
-within that spread as noise.
+within that spread as noise. With tracing on, each run's metrics are also attached to its
+Langfuse trace as scores, and all runs of one eval share a session.
 
 ## Development
 
@@ -191,6 +201,7 @@ src/research_agent/
   retrieval/                            recent window, buckets, second source, rerank,
                                         citation expansion, selection
   pipeline.py                           orchestration
+  tracing.py                            Langfuse tracing helpers (no-op without keys)
   agent/                                tool-calling agent
   api/                                  FastAPI app + web UI
   evals/                                golden matching, LLM judge, metrics, runner
@@ -202,7 +213,8 @@ tests/
 
 - [x] Citation-graph expansion (pull in landmark papers that top results cite)
 - [x] Second source for biomedical topics (Europe PMC)
-- [ ] LangGraph orchestration + Langfuse tracing
+- [x] Langfuse tracing (steps, LLM calls, tokens, eval scores)
+- [ ] LangGraph orchestration
 - [ ] Deep-research mode (planner + parallel sub-researchers)
 - [ ] Full-text RAG over open-access PDFs
 

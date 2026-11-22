@@ -43,6 +43,7 @@ from research_agent.sources.openalex import (  # noqa: E402
     OpenAlexRateLimitError,
     create_openalex_client,
 )
+from research_agent.tracing import flush_tracing  # noqa: E402
 
 EVALS_DIR = Path(__file__).parent
 
@@ -92,6 +93,7 @@ async def main() -> int:
                 client=client,
                 judge=judge,
                 on_progress=print,
+                label=args.label,
             )
     except OpenAlexRateLimitError as exc:
         print(f"\nStopped: {exc}")
@@ -99,6 +101,7 @@ async def main() -> int:
     finally:
         if judge_cache:
             judge_cache.close()
+        flush_tracing()  # send the last traces before the script exits
 
     report = build_report(
         results,

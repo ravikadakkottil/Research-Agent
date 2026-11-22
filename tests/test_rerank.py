@@ -157,6 +157,20 @@ def test_server_retry_delay_is_read_from_google_error():
     assert server_retry_delay(None) is None
 
 
+def test_daily_quota_is_not_retried():
+    """A per-DAY limit says 'retry in 4229s': retrying would only stall the run."""
+
+    def quota_error(delay: str) -> Exception:
+        exc = Exception("429 RESOURCE_EXHAUSTED")
+        exc.code = 429
+        exc.details = {"error": {"details": [{"retryDelay": delay}]}}
+        return exc
+
+    assert embeddings_module._is_retryable(quota_error("34s"))  # per-minute: wait, retry
+    assert not embeddings_module._is_retryable(quota_error("4229s"))  # per-day: give up now
+    assert embeddings_module._is_retryable(RateLimited())  # no hint: backoff
+
+
 def test_embedder_rejects_wrong_vector_count():
     with pytest.raises(EmbeddingError, match="asked for 2"):
         asyncio.run(make_embedder(FakeGenAI(drop_one=True)).embed_documents(["a", "b"]))

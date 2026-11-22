@@ -17,3 +17,5 @@ os.environ["EMBEDDING_CACHE_ENABLED"] = "false"
 os.environ["GEMINI_API_KEY"] = ""
 # No real Europe PMC calls: tests use a fake transport.
 os.environ["EUROPEPMC_ENABLED"] = "false"
+# No traces sent to Langfuse from tests (your real keys may be in .env).
+os.environ["TRACING_ENABLED"] = "false"

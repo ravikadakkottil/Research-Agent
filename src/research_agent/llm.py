@@ -12,13 +12,14 @@ Async (AsyncGroq): while one LLM call waits on the network, other work
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from groq import AsyncGroq, BadRequestError
 from pydantic import BaseModel, ValidationError
 
 from research_agent.cache import ResponseCache
 from research_agent.config import Settings, get_settings
+from research_agent.tracing import observe
 
 # T = "whichever Pydantic model you pass in"; ask_json returns that same type.
 T = TypeVar("T", bound=BaseModel)
@@ -93,7 +94,16 @@ async def ask_json(
             },
         )
         if (hit := cache.get(key)) is not None:
-            return schema.model_validate(hit)
+            # Still traced, so the trace shows WHAT the plan/summary was.
+            with observe(
+                f"llm: {schema.__name__} (cached)",
+                as_type="generation",
+                model=model,
+                input=_messages(system_prompt, user_prompt),
+                output=hit,
+                metadata={"cache_hit": True},
+            ):
+                return schema.model_validate(hit)
 
     # Models occasionally produce broken/empty JSON (Groq then answers 400
     # "json_validate_failed"), or valid JSON of the wrong shape. That's random,
@@ -116,25 +126,52 @@ async def _complete_json(
     system_prompt: str, user_prompt: str, schema: type[T], model: str, settings: Settings
 ) -> T:
     """One attempt. Bad output -> LLMOutputError (worth retrying); other errors as-is."""
-    try:
-        completion = await get_client().chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=settings.llm_temperature,
-        )
-    except BadRequestError as exc:
-        if "json_validate_failed" in str(exc):
-            raise LLMOutputError(f"LLM produced invalid JSON: {exc}") from exc
-        raise
-    raw = completion.choices[0].message.content or ""
+    messages = _messages(system_prompt, user_prompt)
+    # A "generation" observation: Langfuse shows prompt, reply, model, tokens, latency.
+    # A failed attempt is marked ERROR, so retries are visible in the trace.
+    with observe(
+        f"llm: {schema.__name__}",
+        as_type="generation",
+        model=model,
+        model_parameters={"temperature": settings.llm_temperature},
+        input=messages,
+    ) as gen:
+        try:
+            completion = await get_client().chat.completions.create(
+                model=model,
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=settings.llm_temperature,
+            )
+        except BadRequestError as exc:
+            if "json_validate_failed" in str(exc):
+                raise LLMOutputError(f"LLM produced invalid JSON: {exc}") from exc
+            raise
+        raw = completion.choices[0].message.content or ""
+        gen.update(output=raw, usage_details=usage_details(completion))
 
-    try:
-        return schema.model_validate_json(raw)
-    except ValidationError as exc:
-        raise LLMOutputError(
-            f"LLM output did not match {schema.__name__}:\n{exc}\n\nRaw output:\n{raw[:1000]}"
-        ) from exc
+        try:
+            return schema.model_validate_json(raw)
+        except ValidationError as exc:
+            raise LLMOutputError(
+                f"LLM output did not match {schema.__name__}:\n{exc}\n\nRaw output:\n{raw[:1000]}"
+            ) from exc
+
+
+def _messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def usage_details(completion: Any) -> dict[str, int] | None:
+    """Token counts from a Groq/OpenAI-style completion, in Langfuse's format."""
+    usage = getattr(completion, "usage", None)
+    if usage is None:
+        return None
+    return {
+        "input": usage.prompt_tokens or 0,
+        "output": usage.completion_tokens or 0,
+        "total": usage.total_tokens or 0,
+    }

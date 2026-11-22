@@ -22,9 +22,11 @@ from pydantic import ValidationError
 from research_agent.agent.loop import run_tool_agent
 from research_agent.cache import ResponseCache
 from research_agent.config import Settings, get_settings
+from research_agent.embeddings import EmbeddingError
 from research_agent.llm import LLMOutputError
 from research_agent.pipeline import run_paper_search
 from research_agent.sources.openalex import OpenAlexRateLimitError
+from research_agent.tracing import flush_tracing
 
 RULE = "=" * 60
 
@@ -104,12 +106,18 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         # asyncio.run: start the event loop, run our async code, close the loop.
-        asyncio.run(_run(question, agent=args.agent, settings=settings))
+        try:
+            asyncio.run(_run(question, agent=args.agent, settings=settings))
+        finally:
+            flush_tracing()  # send buffered spans before the process exits
     except OpenAlexRateLimitError as exc:
         print(f"\n{exc}")
         return 1
     except LLMOutputError as exc:
         print(f"\nThe LLM returned an unexpected format. Try again.\n{exc}")
+        return 1
+    except EmbeddingError as exc:
+        print(f"\n{exc}\n(Daily Gemini quota? Set RERANK_ENABLED=false in .env to run without it.)")
         return 1
     except ValidationError as exc:  # e.g. GROQ_API_KEY missing from .env
         print(f"\nConfiguration error (check your .env):\n{exc}")

@@ -29,6 +29,7 @@ from tenacity import (
 
 from research_agent.cache import ResponseCache
 from research_agent.config import Settings
+from research_agent.tracing import observe
 
 Vector = list[float]
 
@@ -62,7 +63,15 @@ def cosine_similarity(a: Vector, b: Vector) -> float:
 
 
 def _is_retryable(exc: BaseException) -> bool:
-    return getattr(exc, "code", None) in RETRYABLE_STATUS
+    """
+    Retry rate limits and server errors, but NOT when the server asks for a longer
+    wait than we'd honour: that's the DAILY quota (retryDelay ~ hours), and
+    retrying it just stalls the run for minutes before failing anyway.
+    """
+    if getattr(exc, "code", None) not in RETRYABLE_STATUS:
+        return False
+    delay = server_retry_delay(exc)
+    return delay is None or delay <= MAX_SERVER_WAIT_SECONDS
 
 
 # Longest server-requested wait we'll honour (free tier: per-MINUTE limits).
@@ -146,24 +155,35 @@ class GeminiEmbedder:
         )
 
     async def _embed(self, texts: list[str], task: str) -> list[Vector]:
-        vectors: list[Vector | None] = [None] * len(texts)
-        missing: list[int] = []
-        for i, text in enumerate(texts):
-            hit = self.cache.get(self._key(text, task)) if self.cache else None
-            if hit is not None:
-                vectors[i] = hit
-            else:
-                missing.append(i)
+        # Traced as an "embedding" observation: how many texts, how many were cached.
+        # Vectors themselves are NOT logged (768 numbers each, meaningless to read).
+        with observe(
+            f"gemini embed ({task.split('_')[-1].lower()})",
+            as_type="embedding",
+            model=self.model,
+            input={"texts": len(texts), "first": texts[0][:200] if texts else None},
+        ) as obs:
+            vectors: list[Vector | None] = [None] * len(texts)
+            missing: list[int] = []
+            for i, text in enumerate(texts):
+                hit = self.cache.get(self._key(text, task)) if self.cache else None
+                if hit is not None:
+                    vectors[i] = hit
+                else:
+                    missing.append(i)
 
-        for start in range(0, len(missing), self.batch_size):
-            batch = missing[start : start + self.batch_size]
-            fresh = await self._call_api([texts[i] for i in batch], task)
-            for i, vector in zip(batch, fresh, strict=True):
-                vectors[i] = vector
-                if self.cache:
-                    self.cache.set(self._key(texts[i], task), vector)
+            for start in range(0, len(missing), self.batch_size):
+                batch = missing[start : start + self.batch_size]
+                fresh = await self._call_api([texts[i] for i in batch], task)
+                for i, vector in zip(batch, fresh, strict=True):
+                    vectors[i] = vector
+                    if self.cache:
+                        self.cache.set(self._key(texts[i], task), vector)
 
-        return [v for v in vectors if v is not None]
+            obs.update(
+                metadata={"cache_hits": len(texts) - len(missing), "sent_to_api": len(missing)}
+            )
+            return [v for v in vectors if v is not None]
 
     async def _call_api(self, texts: list[str], task: str) -> list[Vector]:
         from google.genai import types

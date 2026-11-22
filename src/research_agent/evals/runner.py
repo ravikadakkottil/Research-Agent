@@ -32,6 +32,7 @@ from research_agent.evals.metrics import RunMetrics, evaluate_run
 from research_agent.pipeline import retrieve_reading_list
 from research_agent.sources.openalex import OpenAlexClient, OpenAlexRateLimitError
 from research_agent.synthesis import summarize_papers
+from research_agent.tracing import observe, papers_brief, score_trace, trace
 
 Mode = Literal["retrieval", "full"]
 
@@ -66,32 +67,48 @@ async def run_one(
     settings: Settings,
     client: OpenAlexClient,
     judge: RelevanceJudge,
+    label: str = "eval",
+    session_id: str | None = None,
 ) -> RunMetrics:
-    started = time.perf_counter()
-    requests_before = client.network_requests
+    # The runner opens the trace (not the pipeline) so the metrics can be attached
+    # to it as scores: in Langfuse, filter "recall < 0.5" and open the bad runs.
+    with trace(
+        f"eval: {topic.id}",
+        input={"question": topic.question},
+        tags=["eval", label],
+        session_id=session_id,
+        metadata={"topic": topic.id, "run": run, "mode": mode, "label": label},
+    ) as root:
+        started = time.perf_counter()
+        requests_before = client.network_requests
 
-    reading = await retrieve_reading_list(topic.question, settings=settings, client=client)
-    summary = None
-    if mode == "full":
-        summary = await summarize_papers(
-            topic.question,
-            reading.papers,
-            recent_window=reading.recent_window,
-            abstract_chars=settings.abstract_chars_for_llm,
+        reading = await retrieve_reading_list(topic.question, settings=settings, client=client)
+        summary = None
+        if mode == "full":
+            summary = await summarize_papers(
+                topic.question,
+                reading.papers,
+                recent_window=reading.recent_window,
+                abstract_chars=settings.abstract_chars_for_llm,
+            )
+        latency = time.perf_counter() - started  # judge time is NOT pipeline latency
+
+        with observe("judge", as_type="evaluator", input={"papers": len(reading.papers)}):
+            verdicts = await judge.judge(topic.question, reading.papers)
+        metrics = evaluate_run(
+            topic,
+            run,
+            reading,
+            verdicts,
+            current_year=date.today().year,
+            summary=summary,
+            latency_s=latency,
+            openalex_requests=client.network_requests - requests_before,
         )
-    latency = time.perf_counter() - started  # judge time is NOT pipeline latency
-
-    verdicts = await judge.judge(topic.question, reading.papers)
-    return evaluate_run(
-        topic,
-        run,
-        reading,
-        verdicts,
-        current_year=date.today().year,
-        summary=summary,
-        latency_s=latency,
-        openalex_requests=client.network_requests - requests_before,
-    )
+        root.update(output={"papers": papers_brief(reading.papers)})
+        for name in METRICS:
+            score_trace(name, getattr(metrics, name))
+        return metrics
 
 
 async def run_eval(
@@ -103,19 +120,29 @@ async def run_eval(
     client: OpenAlexClient,
     judge: RelevanceJudge,
     on_progress: Callable[[str], None] = lambda _: None,
+    label: str = "eval",
 ) -> list[RunMetrics]:
     """Topics run one after another (gentle on free-tier rate limits)."""
     results: list[RunMetrics] = []
     total = len(topics) * runs
+    # All traces of this eval share one Langfuse session (Sessions view groups them).
+    session_id = f"eval {label} {datetime.now():%Y%m%d-%H%M%S}"
     for run in range(1, runs + 1):
         for topic in topics:
-            label = f"[{len(results) + 1}/{total}] run {run} · {topic.id}"
+            progress = f"[{len(results) + 1}/{total}] run {run} · {topic.id}"
             try:
                 metrics = await run_one(
-                    topic, run, mode=mode, settings=settings, client=client, judge=judge
+                    topic,
+                    run,
+                    mode=mode,
+                    settings=settings,
+                    client=client,
+                    judge=judge,
+                    label=label,
+                    session_id=session_id,
                 )
                 on_progress(
-                    f"{label:<40} recall={_fmt(metrics.recall)} "
+                    f"{progress:<40} recall={_fmt(metrics.recall)} "
                     f"precision={_fmt(metrics.precision)} ({metrics.latency_s:.1f}s)"
                 )
             except OpenAlexRateLimitError:
@@ -124,7 +151,7 @@ async def run_eval(
                 metrics = RunMetrics(
                     topic_id=topic.id, run=run, error=f"{type(exc).__name__}: {exc}"
                 )
-                on_progress(f"{label:<40} FAILED: {metrics.error[:120]}")
+                on_progress(f"{progress:<40} FAILED: {metrics.error[:120]}")
             results.append(metrics)
     return results
 

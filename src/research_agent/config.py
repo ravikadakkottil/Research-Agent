@@ -143,6 +143,14 @@ class Settings(BaseSettings):
     # Auto-restart the server when code changes (handy while developing).
     api_reload: bool = True
 
+    # --- Tracing (Langfuse) ------------------------------------------------------
+    # Every run becomes a trace: steps, LLM prompts/replies, tokens, latency,
+    # OpenAlex queries. On only when both keys are set (see tracing.py).
+    tracing_enabled: bool = True
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_base_url: str = "https://cloud.langfuse.com"  # EU; US: https://us.cloud.langfuse.com
+
     # --- Evals --------------------------------------------------------------
     # The judge grades the pipeline's output, so use a STRONGER model than the
     # one being judged. On Groq it also has its own separate token budget.

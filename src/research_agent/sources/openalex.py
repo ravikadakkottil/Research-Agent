@@ -29,6 +29,7 @@ from tenacity import (
 from research_agent.cache import ResponseCache
 from research_agent.config import Settings
 from research_agent.models import Paper
+from research_agent.tracing import observe
 
 # Fields we ask OpenAlex for. Smaller responses = faster + cheaper.
 BASE_FIELDS = "id,doi,display_name,publication_year,cited_by_count,authorships,primary_location"
@@ -146,6 +147,17 @@ def short_id(openalex_url: str) -> str:
     return openalex_url.rstrip("/").rsplit("/", 1)[-1]
 
 
+def _response_summary(data: dict[str, Any]) -> dict[str, Any]:
+    """What a trace shows for a response: counts + titles, not the whole JSON."""
+    if "results" in data:
+        return {
+            "total_matches": (data.get("meta") or {}).get("count"),
+            "returned": len(data["results"]),
+            "titles": [(w.get("display_name") or "")[:100] for w in data["results"][:10]],
+        }
+    return {"title": data.get("display_name"), "id": data.get("id")}
+
+
 def _parse_retry_after(value: str | None) -> float | None:
     try:
         return float(value) if value is not None else None
@@ -200,15 +212,19 @@ class OpenAlexClient:
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         query = dict(params or {})
 
-        key = ResponseCache.make_key(path, query) if self.cache else None
-        if key and (cached := self.cache.get(key)) is not None:
-            return cached
+        # Traced input = the query WITHOUT auth params (api_key never reaches a trace).
+        with observe(f"openalex {path}", input=query) as obs:
+            key = ResponseCache.make_key(path, query) if self.cache else None
+            if key and (cached := self.cache.get(key)) is not None:
+                obs.update(output=_response_summary(cached), metadata={"cache_hit": True})
+                return cached
 
-        data = await self._get_with_retries(path, {**self._auth_params(), **query})
+            data = await self._get_with_retries(path, {**self._auth_params(), **query})
+            obs.update(output=_response_summary(data), metadata={"cache_hit": False})
 
-        if key:
-            self.cache.set(key, data)
-        return data
+            if key:
+                self.cache.set(key, data)
+            return data
 
     def _auth_params(self) -> dict[str, str]:
         auth: dict[str, str] = {}
