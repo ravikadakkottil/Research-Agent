@@ -86,7 +86,11 @@ def _key_relevant(p: Paper) -> tuple:
 
 
 def _key_recent(p: Paper) -> tuple:
-    return (p.year or 0, p.cited_by_count, _n_reasons(p))
+    # Every paper here is already inside the recent window, so "newest first" only
+    # favoured this year's papers over last year's. With a generic core query the
+    # bucket fills with popular general papers (a survey of LLMs for an LLM tool-use
+    # question), so rank by how on-topic it is; citations break ties.
+    return (_sim(p), p.cited_by_count, p.year or 0)
 
 
 def _key_highly_cited(p: Paper) -> tuple:
@@ -117,7 +121,7 @@ def select_balanced_papers(
     Soft quotas per perspective, then fill the rest with multi-bucket papers.
 
       1) up to quotas["relevant"] relevant papers
-      2) up to quotas["recent"] recent papers
+      2) up to quotas["recent"] recent papers, most similar to the question first
       3) up to quotas["highly_cited"] highly cited papers
       4) up to quotas["cited_by_top"] co-cited papers, most similar to the question first
       5) remaining slots -> papers found by several buckets / strongest leftovers

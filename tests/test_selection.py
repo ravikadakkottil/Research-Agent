@@ -65,6 +65,35 @@ def test_select_balances_buckets():
     assert sum(i.startswith("C") for i in ids) >= 3
 
 
+def test_recent_quota_prefers_on_topic_over_newest():
+    newest_generic = Paper(
+        openalex_id="G",
+        year=2026,
+        cited_by_count=5000,
+        similarity=0.67,
+        retrieval_reasons=["recent"],
+    )
+    older_on_topic = Paper(
+        openalex_id="T",
+        year=2025,
+        cited_by_count=300,
+        similarity=0.78,
+        retrieval_reasons=["recent"],
+    )
+    chosen = select_balanced_papers(
+        [newest_generic, older_on_topic], target_count=1, quotas={"recent": 1}
+    )
+    assert chosen[0].openalex_id == "T"
+
+
+def test_recent_quota_without_rerank_falls_back_to_citations():
+    # similarity None (rerank skipped) -> ties at 0, so citations decide
+    popular = Paper(openalex_id="P", year=2024, cited_by_count=900, retrieval_reasons=["recent"])
+    newer = Paper(openalex_id="N", year=2026, cited_by_count=10, retrieval_reasons=["recent"])
+    chosen = select_balanced_papers([newer, popular], target_count=1, quotas={"recent": 1})
+    assert chosen[0].openalex_id == "P"
+
+
 def test_select_prefers_multi_bucket_papers_for_leftover_slots():
     multi = Paper(openalex_id="M", retrieval_reasons=["relevant", "recent"])
     singles = [Paper(openalex_id=f"S{i}", retrieval_reasons=["relevant"]) for i in range(5)]
