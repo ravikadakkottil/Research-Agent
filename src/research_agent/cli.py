@@ -7,6 +7,7 @@ Usage:
     research-agent --agent "..."         # tool-calling agent mode
     research-agent --no-cache "..."      # always hit OpenAlex (skip the cache)
     research-agent --clear-cache         # delete cached OpenAlex responses
+    research-agent --graph               # print the pipeline graph (Mermaid), exit
     python -m research_agent ...         # same as research-agent
 """
 
@@ -24,7 +25,7 @@ from research_agent.cache import ResponseCache
 from research_agent.config import Settings, get_settings
 from research_agent.embeddings import EmbeddingError
 from research_agent.llm import LLMOutputError
-from research_agent.pipeline import run_paper_search
+from research_agent.pipeline import run_paper_search, search_graph
 from research_agent.sources.openalex import OpenAlexRateLimitError
 from research_agent.tracing import flush_tracing
 
@@ -47,6 +48,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--clear-cache", action="store_true", help="delete cached OpenAlex + LLM responses, exit"
+    )
+    parser.add_argument(
+        "--graph", action="store_true", help="print the pipeline graph as Mermaid, exit"
     )
     return parser.parse_args(argv)
 
@@ -83,6 +87,10 @@ async def _run(question: str, *, agent: bool, settings: Settings) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.graph:
+        # Paste into https://mermaid.live (or a Markdown file) to see the diagram.
+        print(search_graph().get_graph().draw_mermaid())
+        return 0
     # Windows terminals can choke on emoji / non-ASCII titles; replace instead of crashing.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")

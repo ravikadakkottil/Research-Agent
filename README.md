@@ -11,7 +11,7 @@ that only cites papers from that list.
    → summary: foundational findings · recent developments · how the field evolved · gaps
 ```
 
-Built with Python, FastAPI, Groq-hosted LLMs, the [OpenAlex](https://openalex.org) scholarly
+Built with Python, LangGraph, FastAPI, Groq-hosted LLMs, the [OpenAlex](https://openalex.org) scholarly
 database and Gemini embeddings. Retrieval quality is measured with an evaluation suite
 (golden dataset + LLM judge).
 
@@ -92,6 +92,11 @@ question
   → LLM: grounded synthesis (validated JSON)
 ```
 
+The steps run as a [LangGraph](https://langchain-ai.github.io/langgraph/) graph, one node
+per step. Optional steps (semantic scoring, citation expansion, similarity filter) are
+conditional edges that follow the configuration. `research-agent --graph` prints the graph
+as a Mermaid diagram.
+
 ## Quick start
 
 Requires Python 3.11+ and three free API keys:
@@ -104,8 +109,22 @@ tracing is off.
 python -m venv .venv
 source .venv/bin/activate            # Windows: .\.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
-cp .env.example .env                 # Windows: copy .env.example .env  — then add your keys
 ```
+
+Create a file named `.env` in the project folder with your keys:
+
+```ini
+GROQ_API_KEY=...            # required
+OPENALEX_API_KEY=...        # recommended: without it, requests share a small anonymous budget
+GEMINI_API_KEY=...          # optional: semantic rerank (skipped without it)
+
+# Optional: Langfuse tracing (tracing is off without these)
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+```
+
+Any setting from [Configuration](#configuration) can be added to `.env` the same way.
 
 ### Web app
 
@@ -141,6 +160,7 @@ research-agent "perovskite solar cell stability"
 research-agent --agent "find 'Attention Is All You Need' and 3 papers citing it"
 research-agent --no-cache "..."      # bypass caches
 research-agent --clear-cache
+research-agent --graph               # print the pipeline graph (Mermaid)
 ```
 
 ## Configuration
@@ -200,7 +220,7 @@ src/research_agent/
   planning.py  synthesis.py             LLM steps
   retrieval/                            recent window, buckets, second source, rerank,
                                         citation expansion, selection
-  pipeline.py                           orchestration
+  pipeline.py                           orchestration (LangGraph graph: state, nodes, edges)
   tracing.py                            Langfuse tracing helpers (no-op without keys)
   agent/                                tool-calling agent
   api/                                  FastAPI app + web UI
@@ -214,7 +234,8 @@ tests/
 - [x] Citation-graph expansion (pull in landmark papers that top results cite)
 - [x] Second source for biomedical topics (Europe PMC)
 - [x] Langfuse tracing (steps, LLM calls, tokens, eval scores)
-- [ ] LangGraph orchestration
+- [x] LangGraph orchestration of the search pipeline
+- [ ] LangGraph agent (tool-calling loop as a graph)
 - [ ] Deep-research mode (planner + parallel sub-researchers)
 - [ ] Full-text RAG over open-access PDFs
 

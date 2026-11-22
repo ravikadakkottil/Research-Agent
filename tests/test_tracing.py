@@ -13,9 +13,11 @@ import httpx
 import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from research_agent import tracing
+from research_agent import pipeline, tracing
 from research_agent.tracing import NOOP, observe, trace
 from tests.test_openalex import make_client
+from tests.test_pipeline import FakeOpenAlex, fakes  # noqa: F401  (fakes is a fixture)
+from tests.test_pipeline import settings as pipeline_settings
 
 EXPORTER = InMemorySpanExporter()
 
@@ -91,6 +93,20 @@ def test_errors_are_recorded_and_reraised(spans):
     attrs = spans()["bad step"].attributes
     assert attrs.get("langfuse.observation.level") == "ERROR"
     assert "boom" in attrs.get("langfuse.observation.status_message", "")
+
+
+@pytest.mark.usefixtures("fakes")
+def test_graph_node_spans_nest_inside_the_search_trace(spans):
+    """LangGraph runs each node as its own task; their spans must still join the trace."""
+    asyncio.run(
+        pipeline.run_paper_search("diffusion", settings=pipeline_settings(), client=FakeOpenAlex())
+    )
+    got = spans()
+
+    root = got["search"]
+    nodes = ("plan", "retrieve", "dedupe", "semantic scoring", "citation expansion")
+    for name in (*nodes, "similarity filter", "select"):
+        assert got[name].parent.span_id == root.context.span_id, name
 
 
 def test_openalex_span_never_contains_the_api_key(spans):
