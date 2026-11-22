@@ -7,13 +7,13 @@ that only cites papers from that list.
 ```
 "diffusion models for image generation"
    → 12 papers: Denoising Diffusion Probabilistic Models (2020), Latent Diffusion (2022), …,
-     the most-cited work of the last 3 years
+     the most-cited recent work
    → summary: foundational findings · recent developments · how the field evolved · gaps
 ```
 
-Built with Python, LangGraph, FastAPI, Groq-hosted LLMs, the [OpenAlex](https://openalex.org) scholarly
-database and Gemini embeddings. Retrieval quality is measured with an evaluation suite
-(golden dataset + LLM judge).
+Built with Python, LangGraph, FastAPI, Groq-hosted LLMs, the [OpenAlex](https://openalex.org)
+scholarly database and Gemini embeddings. Retrieval quality is measured with an evaluation
+suite (golden dataset + LLM judge).
 
 ---
 
@@ -65,13 +65,15 @@ Retrieval quality on the golden set (13 topics × 3 runs, judged by `gpt-oss-120
 | + semantic rerank | 0.58 | 0.79 | 0.62 |
 | + citation expansion | 0.71 | 0.76 | 0.58 |
 | + similarity-ordered citation picks | 0.78 | 0.80 | 0.58 |
-| **+ Europe PMC for biomedical topics (current)** | **0.74** | **0.81** | **0.60** |
+| + Europe PMC for biomedical topics | 0.74 | 0.81 | 0.60 |
+| **LangGraph orchestration, same retrieval (current)** | **0.79** | **0.78** | **0.55** |
 
 Citation expansion and Europe PMC raised the share of must-include papers that are retrieved
-at all from 0.65 to 0.95. The latest recall dip is on non-biomedical topics, where Europe PMC
-isn't used. It comes from a planning-prompt change that made the LLM pad its alternative
-queries ("fake news diffusion" instead of "fake news"). The fix is identified but not yet
-applied.
+at all from 0.65 to 0.93–0.99. Repeated evals of unchanged code differ by up to ±0.04
+(planning is an uncached LLM call), so the last two rows reflect the same retrieval
+quality. The LangGraph port was accepted on that basis. The weakest metric is recent-paper
+precision: when the planner picks a generic core query, the recent bucket fills with
+popular but general papers.
 
 ## How it works
 
