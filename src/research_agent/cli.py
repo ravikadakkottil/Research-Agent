@@ -8,6 +8,7 @@ Usage:
     research-agent --no-cache "..."      # always hit OpenAlex (skip the cache)
     research-agent --clear-cache         # delete cached OpenAlex responses
     research-agent --graph               # print the pipeline graph (Mermaid), exit
+    research-agent --graph agent         # print the agent graph (Mermaid), exit
     python -m research_agent ...         # same as research-agent
 """
 
@@ -20,7 +21,7 @@ import sys
 
 from pydantic import ValidationError
 
-from research_agent.agent.loop import run_tool_agent
+from research_agent.agent.loop import agent_graph, run_tool_agent
 from research_agent.cache import ResponseCache
 from research_agent.config import Settings, get_settings
 from research_agent.embeddings import EmbeddingError
@@ -50,7 +51,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--clear-cache", action="store_true", help="delete cached OpenAlex + LLM responses, exit"
     )
     parser.add_argument(
-        "--graph", action="store_true", help="print the pipeline graph as Mermaid, exit"
+        "--graph",
+        nargs="?",
+        const="search",  # bare --graph = the pipeline, as before
+        choices=["search", "agent"],
+        help="print the pipeline (default) or agent graph as Mermaid, exit",
     )
     return parser.parse_args(argv)
 
@@ -89,7 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     if args.graph:
         # Paste into https://mermaid.live (or a Markdown file) to see the diagram.
-        print(search_graph().get_graph().draw_mermaid())
+        graph = agent_graph() if args.graph == "agent" else search_graph()
+        print(graph.get_graph().draw_mermaid())
         return 0
     # Windows terminals can choke on emoji / non-ASCII titles; replace instead of crashing.
     if hasattr(sys.stdout, "reconfigure"):

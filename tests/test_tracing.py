@@ -14,7 +14,10 @@ import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from research_agent import pipeline, tracing
+from research_agent.agent import loop as agent_loop
 from research_agent.tracing import NOOP, observe, trace
+from tests.test_agent_loop import fake_llm, reply, tool_call  # noqa: F401  (fake_llm: fixture)
+from tests.test_agent_loop import settings as agent_settings
 from tests.test_openalex import make_client
 from tests.test_pipeline import FakeOpenAlex, fakes  # noqa: F401  (fakes is a fixture)
 from tests.test_pipeline import settings as pipeline_settings
@@ -107,6 +110,24 @@ def test_graph_node_spans_nest_inside_the_search_trace(spans):
     nodes = ("plan", "retrieve", "dedupe", "semantic scoring", "citation expansion")
     for name in (*nodes, "similarity filter", "select"):
         assert got[name].parent.span_id == root.context.span_id, name
+
+
+def test_agent_spans_nest_inside_the_agent_trace(spans, fake_llm):  # noqa: F811  (fixture)
+    fake_llm(
+        [
+            reply(calls=[tool_call("c1", "search_papers", query="graph attention")]),
+            reply("GAT [W2766453196]."),
+        ]
+    )
+    asyncio.run(agent_loop.run_tool_agent("q", settings=agent_settings()))
+    got = spans()
+
+    root = got["agent"]
+    for name in ("agent step 1", "tool: search_papers", "agent step 2", "grounding check"):
+        assert got[name].parent.span_id == root.context.span_id, name
+        assert got[name].context.trace_id == root.context.trace_id, name
+    assert got["agent step 1"].attributes["langfuse.observation.type"] == "generation"
+    assert got["tool: search_papers"].attributes["langfuse.observation.type"] == "tool"
 
 
 def test_openalex_span_never_contains_the_api_key(spans):

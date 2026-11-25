@@ -104,6 +104,11 @@ per step. Optional steps (semantic scoring, citation expansion, similarity filte
 conditional edges that follow the configuration. `research-agent --graph` prints the graph
 as a Mermaid diagram.
 
+The agent is a LangGraph graph too: an `llm` node and a `tools` node loop until the model
+answers without calling a tool, then a `ground` node checks every cited paper against what
+the tools returned. A step limit ends the loop if the model never stops calling tools.
+`research-agent --graph agent` prints it.
+
 ## Quick start
 
 Requires Python 3.11+ and three free API keys:
@@ -168,6 +173,7 @@ research-agent --agent "find 'Attention Is All You Need' and 3 papers citing it"
 research-agent --no-cache "..."      # bypass caches
 research-agent --clear-cache
 research-agent --graph               # print the pipeline graph (Mermaid)
+research-agent --graph agent         # print the agent graph (Mermaid)
 ```
 
 ## Configuration
@@ -229,7 +235,7 @@ src/research_agent/
                                         citation expansion, selection
   pipeline.py                           orchestration (LangGraph graph: state, nodes, edges)
   tracing.py                            Langfuse tracing helpers (no-op without keys)
-  agent/                                tool-calling agent
+  agent/                                tool-calling agent (LangGraph loop), tools, grounding
   api/                                  FastAPI app + web UI
   evals/                                golden matching, LLM judge, metrics, runner
 evals/                                  golden dataset, eval + compare scripts, results
@@ -242,7 +248,8 @@ tests/
 - [x] Second source for biomedical topics (Europe PMC)
 - [x] Langfuse tracing (steps, LLM calls, tokens, eval scores)
 - [x] LangGraph orchestration of the search pipeline
-- [ ] LangGraph agent (tool-calling loop as a graph)
+- [x] LangGraph agent (tool-calling loop as a graph)
+- [ ] Agent history budget (keep long tool-calling runs under the model's request size limit)
 - [ ] Deep-research mode (planner + parallel sub-researchers)
 - [ ] Full-text RAG over open-access PDFs
 
