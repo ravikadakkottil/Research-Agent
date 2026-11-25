@@ -61,3 +61,4 @@ select = ["E", "W", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]      # project root on sys.path, so `from tests.x import y` works
