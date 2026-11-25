@@ -7,8 +7,10 @@ check only HTTP concerns: routing, validation, status codes and SSE streaming.
 
 import json
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from groq import APIStatusError
 
 from research_agent.api import app as app_module
 from research_agent.models import (
@@ -106,6 +108,27 @@ def test_rate_limit_maps_to_429(client, monkeypatch):
     response = client.post("/api/search", json={"question": "graph neural networks"})
     assert response.status_code == 429
     assert "budget" in response.json()["detail"]
+
+
+def _groq_error(status: int, message: str) -> APIStatusError:
+    response = httpx.Response(status, request=httpx.Request("POST", "https://api.groq.com"))
+    return APIStatusError(message, response=response, body=None)
+
+
+@pytest.mark.parametrize(("status", "words"), [(413, "too large"), (429, "Try again in 2m3s")])
+def test_llm_limits_become_clear_errors(client, monkeypatch, status, words):
+    async def failing_agent(question, **kwargs):
+        raise _groq_error(status, "limit in organization `org_123`: try again in 2m3s.")
+
+    monkeypatch.setattr(app_module, "run_tool_agent", failing_agent)
+    response = client.post("/api/agent", json={"question": "graph neural networks"})
+    assert response.status_code == status
+    assert words in response.json()["detail"]
+    assert "org_" not in response.json()["detail"]  # the account ID never reaches the browser
+
+    stream = client.get("/api/agent/stream", params={"question": "graph neural networks"})
+    ((name, data),) = parse_sse(stream.text)
+    assert (name, data["status"]) == ("failure", status)
 
 
 def test_search_stream_sends_steps_then_result(client):

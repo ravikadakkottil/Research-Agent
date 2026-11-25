@@ -107,7 +107,10 @@ as a Mermaid diagram.
 The agent is a LangGraph graph too: an `llm` node and a `tools` node loop until the model
 answers without calling a tool, then a `ground` node checks every cited paper against what
 the tools returned. A step limit ends the loop if the model never stops calling tools.
-`research-agent --graph agent` prints it.
+Every step re-sends the conversation, so a size budget keeps each request under the model's
+limit. Older tool results are shortened to IDs and titles. If that still isn't enough, a
+`finish` node asks for an answer from what was found so far. `research-agent --graph
+agent` prints it.
 
 ## Quick start
 
@@ -190,6 +193,8 @@ All settings live in `src/research_agent/config.py` and can be overridden in `.e
 | `CITATION_EXPANSION_ENABLED` | `true` | citation expansion on/off |
 | `EXPANSION_MIN_CITERS` | `3` | top papers that must cite a paper before it's added |
 | `EXPANSION_MIN_SIMILARITY` | `0.68` | stricter similarity bar for papers found only through citations |
+| `MAX_AGENT_STEPS` | `8` | agent: maximum LLM turns per question |
+| `AGENT_MAX_INPUT_TOKENS` | `5000` | agent: size budget per LLM request; older tool results are shortened above it |
 | `EUROPEPMC_ENABLED` | `true` | Europe PMC search for biomedical questions |
 | `EUROPEPMC_TIMEOUT_SECONDS` | `20` | time limit for that step (then OpenAlex only) |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | none | Langfuse project keys; tracing is on when both are set |
@@ -235,7 +240,8 @@ src/research_agent/
                                         citation expansion, selection
   pipeline.py                           orchestration (LangGraph graph: state, nodes, edges)
   tracing.py                            Langfuse tracing helpers (no-op without keys)
-  agent/                                tool-calling agent (LangGraph loop), tools, grounding
+  agent/                                tool-calling agent (LangGraph loop), tools, history
+                                        budget, grounding
   api/                                  FastAPI app + web UI
   evals/                                golden matching, LLM judge, metrics, runner
 evals/                                  golden dataset, eval + compare scripts, results
@@ -249,7 +255,8 @@ tests/
 - [x] Langfuse tracing (steps, LLM calls, tokens, eval scores)
 - [x] LangGraph orchestration of the search pipeline
 - [x] LangGraph agent (tool-calling loop as a graph)
-- [ ] Agent history budget (keep long tool-calling runs under the model's request size limit)
+- [x] Agent history budget (keep long tool-calling runs under the model's request size limit)
+- [ ] Check that the title next to each cited ID matches that paper
 - [ ] Deep-research mode (planner + parallel sub-researchers)
 - [ ] Full-text RAG over open-access PDFs
 

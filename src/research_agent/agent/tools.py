@@ -156,10 +156,16 @@ def _limit(what: str) -> dict[str, Any]:
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     _schema(
         "search_papers",
-        "Search academic papers on OpenAlex by keyword query. "
+        "Search academic papers on OpenAlex by keyword query, ranked by relevance. "
+        "Matches words in titles, abstracts and full text; it does NOT search author "
+        "names or years, so don't put them in the query. To find a specific paper, "
+        "search with words from its title. "
         "Use this first when the user asks about a research topic.",
         {
-            "query": {"type": "string", "description": "Short academic search query (keywords)."},
+            "query": {
+                "type": "string",
+                "description": "Short academic search query: topic or title words only.",
+            },
             "limit": _limit("papers to return"),
         },
         ["query"],
@@ -173,15 +179,16 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _schema(
         "get_citations",
-        "List papers that CITE a given paper (incoming citations). "
-        "Useful to see later work built on this paper.",
+        "List papers that CITE a given paper (incoming citations), most cited first. "
+        "Use it for later work that built on this paper.",
         {"paper_id": _PAPER_ID, "limit": _limit("citing papers")},
         ["paper_id"],
     ),
     _schema(
         "get_references",
         "List papers REFERENCED by a given paper (its bibliography). "
-        "Useful to find foundational prior work.",
+        "Use it for what a paper built on: its foundations and prior work. "
+        "This finds a paper's predecessors far more reliably than searching for them.",
         {"paper_id": _PAPER_ID, "limit": _limit("referenced papers")},
         ["paper_id"],
     ),

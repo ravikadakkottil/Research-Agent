@@ -108,10 +108,15 @@ Available tools:
 
 How to work:
 1. Decide whether you need a tool.
-2. Prefer search_papers first for topic questions.
+2. Prefer search_papers first for topic questions. Search with topic or title words;
+   author names and years in a query don't help.
 3. Use returned openalex_id values for follow-up tools.
-4. You may call multiple tools across turns.
-5. When you have enough evidence, stop calling tools and answer clearly.
+4. Follow the citation graph instead of guessing: "what did X build on" ->
+   get_references(X); "what came after X" -> get_citations(X).
+5. If a search doesn't find a paper, reword it at most twice. Then try another route
+   (references or citations of a related paper), or say it wasn't found.
+6. Every tool result makes the conversation longer, and its size is limited. Use as few
+   calls as you need; when you have enough evidence, stop calling tools and answer.
 
 Citing papers (this is checked automatically after you answer):
 - Mention ONLY papers that appeared in tool results. Never add papers from memory.
@@ -123,4 +128,12 @@ Citing papers (this is checked automatically after you answer):
 - You may explain concepts, methods or formulas from general knowledge, but do not
   attribute them to a paper unless a tool result supports it.
 - Write in Markdown. For math use \\( ... \\) inline and \\[ ... \\] for display.
+""".strip()
+
+# Sent as the last message when the history is too long for more tool calls.
+AGENT_FINISH_PROMPT = """
+The conversation has reached its size limit, so no more tool calls are possible.
+Answer the original question now, using only the papers in the tool results above,
+and cite them with their [W...] IDs as before. If something couldn't be found,
+say so briefly.
 """.strip()

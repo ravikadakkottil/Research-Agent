@@ -16,7 +16,9 @@ from types import SimpleNamespace
 import pytest
 
 from research_agent.agent import loop
+from research_agent.agent.history import estimate_tokens, shorten_tool_result
 from research_agent.config import Settings
+from research_agent.prompts import AGENT_FINISH_PROMPT, AGENT_PROMPT
 from tests.test_agent_grounding import FakeOpenAlex
 
 
@@ -187,10 +189,69 @@ def test_graph_shape():
         ("llm", "tools"),
         ("llm", "ground"),
         ("tools", "llm"),
+        ("tools", "finish"),
         ("tools", "out_of_steps"),
+        ("finish", "ground"),
         ("ground", "__end__"),
         ("out_of_steps", "__end__"),
     }
+
+
+def _start_tokens() -> int:
+    return estimate_tokens(
+        [{"role": "system", "content": AGENT_PROMPT}, {"role": "user", "content": "q"}]
+    )
+
+
+def test_history_too_long_wraps_up_with_a_grounded_answer(fake_llm):
+    # Budget: the first request fits, but not one more full search result.
+    llm = fake_llm(
+        [
+            reply(calls=[tool_call("c1", "search_papers", query="graph attention")]),
+            reply("From what I found: GAT [W2766453196]."),  # the wrap-up answer
+        ]
+    )
+    s = Settings(
+        max_agent_steps=8, agent_default_limit=5, agent_max_input_tokens=_start_tokens() + 100
+    )
+    result, steps = run("q", s=s)
+
+    assert len(llm.requests) == 2
+    finish = llm.requests[1]
+    assert finish["tool_choice"] == "none"  # it must answer, not call tools
+    assert finish["messages"][-1]["content"] == AGENT_FINISH_PROMPT
+    shortened = json.loads(finish["messages"][-2]["content"])  # the search result
+    assert "note" in shortened and "abstract" not in shortened["papers"][0]
+
+    assert "\n--- Wrapping up: the history is at its size limit ---" in steps
+    assert result.answer == "From what I found: GAT [W2766453196]."
+    assert [p.title for p in result.sources] == ["Graph Attention Networks"]
+
+
+def test_older_tool_results_are_shortened_before_sending(fake_llm):
+    script = [
+        reply(calls=[tool_call("c1", "search_papers", query="a")]),
+        reply(calls=[tool_call("c2", "search_papers", query="b")]),
+        reply("done [W2766453196]"),
+    ]
+    # Run 1, roomy budget: see the full third request.
+    full = fake_llm(list(script))
+    run("q")
+    third = full.requests[2]["messages"]
+    # Run 2, budget: exactly enough once the FIRST result is shortened.
+    first_shortened = list(third)
+    first_shortened[3] = {**third[3], "content": shorten_tool_result(third[3]["content"])}
+    s = Settings(max_agent_steps=4, agent_default_limit=5)
+    s = s.model_copy(update={"agent_max_input_tokens": estimate_tokens(first_shortened)})
+
+    llm = fake_llm(list(script))
+    result, steps = run("q", s=s)
+
+    sent = llm.requests[2]["messages"]
+    assert sent[3]["content"] == first_shortened[3]["content"]  # older result: shortened
+    assert sent[5]["content"] == third[5]["content"]  # latest result: complete
+    assert any(st.startswith("History shortened: 1 older tool result(s)") for st in steps)
+    assert result.answer == "done [W2766453196]"  # still answered by the normal llm node
 
 
 def test_tool_errors_go_back_to_the_model(fake_llm):

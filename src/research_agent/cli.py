@@ -19,13 +19,14 @@ import asyncio
 import json
 import sys
 
+from groq import APIStatusError
 from pydantic import ValidationError
 
 from research_agent.agent.loop import agent_graph, run_tool_agent
 from research_agent.cache import ResponseCache
 from research_agent.config import Settings, get_settings
 from research_agent.embeddings import EmbeddingError
-from research_agent.llm import LLMOutputError
+from research_agent.llm import LLMOutputError, describe_llm_limit
 from research_agent.pipeline import run_paper_search, search_graph
 from research_agent.sources.openalex import OpenAlexRateLimitError
 from research_agent.tracing import flush_tracing
@@ -129,6 +130,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except LLMOutputError as exc:
         print(f"\nThe LLM returned an unexpected format. Try again.\n{exc}")
+        return 1
+    except APIStatusError as exc:  # Groq refused the request
+        if (message := describe_llm_limit(exc)) is None:
+            raise
+        print(f"\n{message}")
         return 1
     except EmbeddingError as exc:
         print(f"\n{exc}\n(Daily Gemini quota? Set RERANK_ENABLED=false in .env to run without it.)")

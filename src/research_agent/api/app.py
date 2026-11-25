@@ -39,7 +39,7 @@ from research_agent import __version__
 from research_agent.agent.loop import run_tool_agent
 from research_agent.api.schemas import AgentAnswer, ErrorBody, QuestionRequest
 from research_agent.config import Settings, get_settings
-from research_agent.llm import LLMOutputError
+from research_agent.llm import LLMOutputError, describe_llm_limit
 from research_agent.models import SearchResult
 from research_agent.pipeline import StepCallback, run_paper_search
 from research_agent.sources.openalex import (
@@ -100,6 +100,10 @@ def _to_http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=429, detail=str(exc))
     if isinstance(exc, LLMOutputError):
         return HTTPException(status_code=502, detail="The LLM returned an unexpected format.")
+    if message := describe_llm_limit(exc):
+        # 429 = try again later; 413 = this question needs too much, narrow it down
+        status = 429 if getattr(exc, "status_code", None) == 429 else 413
+        return HTTPException(status_code=status, detail=message)
     logger.exception("Unhandled error", exc_info=exc)
     return HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
 
@@ -153,7 +157,8 @@ def _sse_response(generator: AsyncIterator[str]) -> StreamingResponse:
 
 
 _ERRORS: dict[int | str, dict[str, Any]] = {
-    429: {"model": ErrorBody, "description": "OpenAlex daily budget used up"},
+    413: {"model": ErrorBody, "description": "Question needs more LLM context than allowed"},
+    429: {"model": ErrorBody, "description": "OpenAlex or LLM rate limit reached"},
     502: {"model": ErrorBody, "description": "LLM returned an unexpected format"},
 }
 

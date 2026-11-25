@@ -11,10 +11,11 @@ Async (AsyncGroq): while one LLM call waits on the network, other work
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from typing import Any, TypeVar
 
-from groq import AsyncGroq, BadRequestError
+from groq import APIStatusError, AsyncGroq, BadRequestError
 from pydantic import BaseModel, ValidationError
 
 from research_agent.cache import ResponseCache
@@ -27,6 +28,31 @@ T = TypeVar("T", bound=BaseModel)
 
 class LLMOutputError(RuntimeError):
     """The LLM replied, but not in the shape we asked for."""
+
+
+_RETRY_IN = re.compile(r"try again in ([0-9hms.]+)")
+
+
+def describe_llm_limit(exc: BaseException) -> str | None:
+    """
+    A user-facing message for the LLM provider's size and rate limits, else None.
+
+    413: one request was larger than the per-minute token limit (waiting won't help).
+    429: the per-minute or per-day token budget is used up (waiting will).
+    The raw message names the account's organization ID, so it's never shown as is.
+    """
+    if not isinstance(exc, APIStatusError):
+        return None
+    if exc.status_code == 413:
+        return (
+            "The request to the LLM was too large for the provider's limit. "
+            "Try a narrower question."
+        )
+    if exc.status_code == 429:
+        wait = _RETRY_IN.search(str(exc))
+        when = f"in {wait.group(1).rstrip('.')}" if wait else "in a few minutes"
+        return f"The LLM provider's rate limit was reached. Try again {when}."
+    return None
 
 
 @lru_cache

@@ -159,6 +159,11 @@ class Settings(BaseSettings):
     # --- Tool-calling agent ---------------------------------------------------
     max_agent_steps: int = 8
     agent_default_limit: int = 5
+    # Size budget for ONE agent LLM request (history + tool schemas), in estimated tokens.
+    # Groq's free tier rejects any single request above the model's tokens-per-minute
+    # limit (8000 for gpt-oss-20b) with a 413, and the reply needs room too. Over budget,
+    # older tool results are shortened; if that's not enough, the agent wraps up.
+    agent_max_input_tokens: int = 5000
 
 
 @lru_cache

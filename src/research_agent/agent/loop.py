@@ -1,12 +1,17 @@
 """
 The tool-calling agent, as a LangGraph graph:
 
-    START -> llm --(tool calls?)--> tools --(steps left?)--> llm      (the loop)
+    START -> llm --(tool calls?)--> tools --(steps left, fits?)--> llm  (the loop)
+              |                       +--(history too long)--> finish -> ground
               |                       +--(no steps left)--> out_of_steps -> END
               +--(final answer)--> ground -> END
 
-    llm           one LLM turn: sees messages + tool schemas, may request tools
+    llm           one LLM turn: sees messages + tool schemas, may request tools.
+                  Older tool results are shortened first if the history is too long
+                  (agent/history.py).
     tools         runs the requested tools in parallel, appends one result per call
+    finish        the history won't fit even shortened: one last LLM call without
+                  tools ("answer now with what you have")
     ground        checks the answer's [W...] IDs against what the tools returned
     out_of_steps  MAX_AGENT_STEPS reached without a final answer
 
@@ -29,11 +34,12 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
 from research_agent.agent.grounding import check_citations
+from research_agent.agent.history import estimate_tokens, fit_history
 from research_agent.agent.tools import TOOL_SCHEMAS, AgentTools
 from research_agent.config import Settings, get_settings
 from research_agent.llm import get_client, usage_details
 from research_agent.models import AgentResult
-from research_agent.prompts import AGENT_PROMPT
+from research_agent.prompts import AGENT_FINISH_PROMPT, AGENT_PROMPT
 from research_agent.sources.openalex import create_openalex_client
 from research_agent.tracing import current_trace_url, observe, score_trace, trace
 
@@ -94,28 +100,62 @@ def _assistant_message_to_dict(message: Any) -> dict[str, Any]:
     return payload
 
 
-async def _node_llm(state: AgentState, runtime: Ctx) -> dict:
-    ctx = runtime.context
+def _fitted(state: AgentState, ctx: AgentContext, *, keep_latest: bool) -> list[dict]:
+    """The history to SEND: older tool results shortened if it's over budget."""
+    full = state["messages"]
+    sent = fit_history(full, ctx.settings.agent_max_input_tokens, keep_latest=keep_latest)
+    if shortened := sum(a is not b for a, b in zip(full, sent, strict=True)):
+        ctx.on_step(
+            f"History shortened: {shortened} older tool result(s) reduced to "
+            f"IDs + titles (~{estimate_tokens(full)} -> ~{estimate_tokens(sent)} tokens)"
+        )
+    return sent
+
+
+async def _call_llm(
+    ctx: AgentContext, name: str, messages: list[dict], *, tool_choice: str
+) -> dict[str, Any]:
     s = ctx.settings
-    step = state.get("step", 0) + 1
-    ctx.on_step(f"\n--- Agent step {step}/{s.max_agent_steps} ---")
     with observe(
-        f"agent step {step}",
+        name,
         as_type="generation",
         model=s.llm_model,
-        model_parameters={"temperature": s.llm_temperature},
-        input=state["messages"],
+        model_parameters={"temperature": s.llm_temperature, "tool_choice": tool_choice},
+        input=messages,
     ) as gen:
         completion = await ctx.llm.chat.completions.create(
             model=s.llm_model,
-            messages=state["messages"],
+            messages=messages,
             tools=TOOL_SCHEMAS,  # what the model may call
-            tool_choice="auto",  # model may call a tool OR answer directly
+            tool_choice=tool_choice,  # "auto": call a tool OR answer; "none": must answer
             temperature=s.llm_temperature,
         )
         message = _assistant_message_to_dict(completion.choices[0].message)
         gen.update(output=message, usage_details=usage_details(completion))
+    return message
+
+
+async def _node_llm(state: AgentState, runtime: Ctx) -> dict:
+    ctx = runtime.context
+    step = state.get("step", 0) + 1
+    ctx.on_step(f"\n--- Agent step {step}/{ctx.settings.max_agent_steps} ---")
+    sent = _fitted(state, ctx, keep_latest=True)
+    message = await _call_llm(ctx, f"agent step {step}", sent, tool_choice="auto")
     return {"messages": [message], "step": step}
+
+
+async def _node_finish(state: AgentState, runtime: Ctx) -> dict:
+    """Too long for another tool round: ask for the answer with what's there."""
+    ctx = runtime.context
+    ctx.on_step("\n--- Wrapping up: the history is at its size limit ---")
+    sent = [
+        *_fitted(state, ctx, keep_latest=False),  # now the newest results may shrink too
+        {"role": "user", "content": AGENT_FINISH_PROMPT},
+    ]
+    # tools stay declared (the history contains tool calls), but none may be called
+    message = await _call_llm(ctx, "agent finish", sent, tool_choice="none")
+    message.pop("tool_calls", None)  # ground reads the content; never loop again
+    return {"messages": [message], "step": state["step"] + 1}
 
 
 async def _traced_tool(tools: AgentTools, call: dict[str, Any]) -> str:
@@ -177,7 +217,12 @@ def _route_after_llm(state: AgentState) -> str:
 
 
 def _route_after_tools(state: AgentState, runtime: Ctx) -> str:
-    return "llm" if state["step"] < runtime.context.settings.max_agent_steps else "out_of_steps"
+    s = runtime.context.settings
+    if state["step"] >= s.max_agent_steps:
+        return "out_of_steps"
+    # Would the next request fit, after shortening the older tool results?
+    fitted = fit_history(state["messages"], s.agent_max_input_tokens)
+    return "llm" if estimate_tokens(fitted) <= s.agent_max_input_tokens else "finish"
 
 
 # --- graph ----------------------------------------------------------------------------
@@ -189,12 +234,14 @@ def agent_graph() -> CompiledStateGraph:
     g = StateGraph(AgentState, context_schema=AgentContext)
     g.add_node("llm", _node_llm)
     g.add_node("tools", _node_tools)
+    g.add_node("finish", _node_finish)
     g.add_node("ground", _node_ground)
     g.add_node("out_of_steps", _node_out_of_steps)
 
     g.add_edge(START, "llm")
     g.add_conditional_edges("llm", _route_after_llm, ["tools", "ground"])
-    g.add_conditional_edges("tools", _route_after_tools, ["llm", "out_of_steps"])
+    g.add_conditional_edges("tools", _route_after_tools, ["llm", "finish", "out_of_steps"])
+    g.add_edge("finish", "ground")
     g.add_edge("ground", END)
     g.add_edge("out_of_steps", END)
     return g.compile(name="agent")
